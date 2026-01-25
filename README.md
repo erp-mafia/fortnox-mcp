@@ -2,6 +2,44 @@
 
 An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish accounting system. This server enables LLMs to interact with Fortnox for managing invoices, customers, suppliers, accounts, and vouchers.
 
+## Quick Start (Claude Desktop)
+
+### 1. Get your Fortnox credentials
+
+1. Register at [Fortnox Developer Portal](https://developer.fortnox.se)
+2. Create an application to get your **Client ID** and **Client Secret**
+3. Complete the OAuth2 flow to get a **Refresh Token**
+
+### 2. Add to Claude Desktop
+
+Open your Claude Desktop config file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add this configuration:
+
+```json
+{
+  "mcpServers": {
+    "fortnox": {
+      "command": "npx",
+      "args": ["-y", "fortnox-mcp-server"],
+      "env": {
+        "FORTNOX_CLIENT_ID": "your-client-id",
+        "FORTNOX_CLIENT_SECRET": "your-client-secret",
+        "FORTNOX_REFRESH_TOKEN": "your-refresh-token"
+      }
+    }
+  }
+}
+```
+
+### 3. Restart Claude Desktop
+
+That's it! You can now ask Claude to manage your Fortnox invoices, customers, and more.
+
+---
+
 ## Features
 
 ### Customer Management
@@ -46,7 +84,21 @@ An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish 
 
 ## Installation
 
+### Via npx (Recommended)
+
+No installation needed! Just add the config above to Claude Desktop.
+
+### Manual Installation
+
 ```bash
+npm install -g fortnox-mcp-server
+```
+
+### From Source
+
+```bash
+git clone https://github.com/jakobwennberg/fortnox-mcp.git
+cd fortnox-mcp
 npm install
 npm run build
 ```
@@ -75,23 +127,7 @@ npm run build
 
 ### With Claude Desktop
 
-Add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "fortnox": {
-      "command": "node",
-      "args": ["/path/to/fortnox-mcp-server/dist/index.js"],
-      "env": {
-        "FORTNOX_CLIENT_ID": "your-client-id",
-        "FORTNOX_CLIENT_SECRET": "your-client-secret",
-        "FORTNOX_REFRESH_TOKEN": "your-refresh-token"
-      }
-    }
-  }
-}
-```
+See [Quick Start](#quick-start-claude-desktop) above.
 
 ### As HTTP Server
 
