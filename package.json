@@ -1,6 +1,7 @@
 {
   "name": "fortnox-mcp-server",
   "version": "1.0.0",
+  "mcpName": "io.github.jakobwennberg/fortnox",
   "description": "MCP server for Fortnox Swedish accounting API integration",
   "type": "module",
   "main": "dist/index.js",
