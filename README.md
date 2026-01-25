@@ -200,6 +200,57 @@ npm run build
 npm run clean
 ```
 
+## Publishing & Distribution
+
+This server is published to multiple registries for easy installation:
+
+| Registry | URL | Purpose |
+|----------|-----|---------|
+| **npm** | [npmjs.com/package/fortnox-mcp-server](https://www.npmjs.com/package/fortnox-mcp-server) | Package distribution via `npx` |
+| **MCP Registry** | [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io) | Official MCP server discovery |
+| **GitHub** | [github.com/jakobwennberg/fortnox-mcp](https://github.com/jakobwennberg/fortnox-mcp) | Source code |
+
+### How It Works
+
+1. **User adds config** to Claude Desktop with `npx fortnox-mcp-server`
+2. **Claude Desktop starts the server** via npx (downloads latest version from npm)
+3. **Server authenticates** with Fortnox using OAuth2 credentials from environment variables
+4. **Claude can now use tools** like `fortnox_list_invoices`, `fortnox_create_customer`, etc.
+5. **Server handles API calls** to Fortnox, including automatic token refresh and rate limiting
+
+### Releasing New Versions
+
+To release a new version, use the release script:
+
+```bash
+# Bug fixes (1.0.0 → 1.0.1)
+npm run release:patch
+
+# New features (1.0.0 → 1.1.0)
+npm run release:minor
+
+# Breaking changes (1.0.0 → 2.0.0)
+npm run release:major
+```
+
+The release script automatically:
+1. Bumps the version in `package.json`
+2. Updates `server.json` for the MCP Registry
+3. Builds the project
+4. Commits and tags the release
+5. Publishes to npm
+6. Publishes to MCP Registry
+7. Pushes to GitHub
+
+**Prerequisites for releasing:**
+- `npm login` - Logged into npm
+- `mcp-publisher login github` - Logged into MCP Registry
+- Clean git working directory
+
+### Users Get Updates Automatically
+
+When you publish a new version, users running `npx -y fortnox-mcp-server` will automatically get the latest version the next time they restart Claude Desktop.
+
 ## License
 
 MIT
