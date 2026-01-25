@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jakobwennberg/fortnox",
+  "description": "MCP server for Fortnox Swedish accounting API integration",
+  "repository": {
+    "url": "https://github.com/jakobwennberg/fortnox-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "fortnox-mcp-server",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FORTNOX_CLIENT_ID",
+          "description": "Your Fortnox app client ID from developer.fortnox.se",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "FORTNOX_CLIENT_SECRET",
+          "description": "Your Fortnox app client secret",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "FORTNOX_REFRESH_TOKEN",
+          "description": "OAuth2 refresh token obtained from Fortnox authorization flow",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
