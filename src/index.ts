@@ -5,16 +5,23 @@
  * An MCP server for integrating with the Fortnox Swedish accounting system.
  * Provides tools for managing invoices, customers, suppliers, accounts, and vouchers.
  *
- * Authentication:
- *   Required environment variables:
- *   - FORTNOX_CLIENT_ID: Your Fortnox app client ID
- *   - FORTNOX_CLIENT_SECRET: Your Fortnox app client secret
- *   - FORTNOX_REFRESH_TOKEN: OAuth2 refresh token
+ * Supports two modes:
  *
- *   Optional:
- *   - FORTNOX_ACCESS_TOKEN: Current access token (will be refreshed automatically)
+ * LOCAL MODE (default):
+ *   Run with npx, users provide their own refresh token
+ *   - FORTNOX_CLIENT_ID: Fortnox app client ID (can be embedded)
+ *   - FORTNOX_CLIENT_SECRET: Fortnox app client secret (can be embedded)
+ *   - FORTNOX_REFRESH_TOKEN: User's OAuth2 refresh token
  *   - TRANSPORT: 'stdio' (default) or 'http'
  *   - PORT: HTTP server port (default: 3000)
+ *
+ * REMOTE MODE (AUTH_MODE=remote):
+ *   Hosted server with OAuth flow
+ *   - AUTH_MODE: Set to 'remote'
+ *   - SERVER_URL: Public URL of the server
+ *   - JWT_SECRET: Secret for signing JWT tokens
+ *   - UPSTASH_REDIS_REST_URL: Redis URL for token storage
+ *   - UPSTASH_REDIS_REST_TOKEN: Redis token
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -22,7 +29,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 
+import { loadConfig, validateEnvironment, logConfig } from "./config.js";
 import { getFortnoxAuth } from "./services/auth.js";
+import { getStorageFromEnv } from "./auth/storage/index.js";
+import { runRemoteServer } from "./server/remote.js";
 import { registerCustomerTools } from "./tools/customers.js";
 import { registerInvoiceTools } from "./tools/invoices.js";
 import { registerSupplierTools } from "./tools/suppliers.js";
@@ -30,19 +40,25 @@ import { registerAccountTools } from "./tools/accounts.js";
 import { registerVoucherTools } from "./tools/vouchers.js";
 import { registerCompanyTools } from "./tools/company.js";
 
-// Create the MCP server
-const server = new McpServer({
-  name: "fortnox-mcp-server",
-  version: "1.0.0"
-});
+/**
+ * Create and configure MCP server with all tools
+ */
+function createMcpServer(): McpServer {
+  const server = new McpServer({
+    name: "fortnox-mcp-server",
+    version: "1.0.0"
+  });
 
-// Register all tools
-registerCustomerTools(server);
-registerInvoiceTools(server);
-registerSupplierTools(server);
-registerAccountTools(server);
-registerVoucherTools(server);
-registerCompanyTools(server);
+  // Register all tools
+  registerCustomerTools(server);
+  registerInvoiceTools(server);
+  registerSupplierTools(server);
+  registerAccountTools(server);
+  registerVoucherTools(server);
+  registerCompanyTools(server);
+
+  return server;
+}
 
 /**
  * Run the server with stdio transport (for local/CLI usage)
@@ -71,15 +87,16 @@ async function runStdio(): Promise<void> {
     process.exit(1);
   }
 
+  const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[FortnoxMCP] Server running via stdio");
 }
 
 /**
- * Run the server with HTTP transport (for remote/web usage)
+ * Run the server with HTTP transport (for local HTTP mode without OAuth)
  */
-async function runHTTP(): Promise<void> {
+async function runLocalHTTP(): Promise<void> {
   // Validate authentication on startup
   try {
     const auth = getFortnoxAuth();
@@ -95,12 +112,13 @@ async function runHTTP(): Promise<void> {
     process.exit(1);
   }
 
+  const server = createMcpServer();
   const app = express();
   app.use(express.json());
 
   // Health check endpoint
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", server: "fortnox-mcp-server" });
+    res.json({ status: "ok", server: "fortnox-mcp-server", mode: "local-http" });
   });
 
   // MCP endpoint
@@ -124,17 +142,36 @@ async function runHTTP(): Promise<void> {
   });
 }
 
-// Determine transport and run
-const transport = process.env.TRANSPORT || "stdio";
+/**
+ * Main entry point
+ */
+async function main(): Promise<void> {
+  try {
+    const config = loadConfig();
+    validateEnvironment(config);
+    logConfig(config);
 
-if (transport === "http") {
-  runHTTP().catch((error) => {
+    if (config.authMode === "remote") {
+      // Remote mode: OAuth with token storage
+      const tokenStorage = getStorageFromEnv();
+      await runRemoteServer({
+        serverUrl: config.serverUrl!,
+        jwtSecret: config.jwtSecret!,
+        tokenStorage,
+        port: config.port,
+      });
+    } else if (config.transport === "http") {
+      // Local HTTP mode (no OAuth, uses env vars)
+      await runLocalHTTP();
+    } else {
+      // Local stdio mode (default)
+      await runStdio();
+    }
+  } catch (error) {
     console.error("Server error:", error);
     process.exit(1);
-  });
-} else {
-  runStdio().catch((error) => {
-    console.error("Server error:", error);
-    process.exit(1);
-  });
+  }
 }
+
+// Run the server
+main();

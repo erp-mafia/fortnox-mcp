@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
-import { getFortnoxAuth } from "./auth.js";
+import { getTokenProvider } from "../auth/index.js";
+import { getCurrentUserId } from "../auth/context.js";
 import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
@@ -38,6 +39,7 @@ async function waitForRateLimit(): Promise<void> {
 
 /**
  * Make an authenticated request to the Fortnox API
+ * Automatically uses the current user context in remote mode
  */
 export async function fortnoxRequest<T>(
   endpoint: string,
@@ -47,8 +49,12 @@ export async function fortnoxRequest<T>(
 ): Promise<T> {
   await waitForRateLimit();
 
-  const auth = getFortnoxAuth();
-  const accessToken = await auth.getAccessToken();
+  // Get access token using the token provider
+  // In local mode, userId is undefined and ignored
+  // In remote mode, userId comes from the request context
+  const tokenProvider = getTokenProvider();
+  const userId = getCurrentUserId();
+  const accessToken = await tokenProvider.getAccessToken(userId);
 
   // Clean undefined params
   const cleanParams: Record<string, string | number | boolean> = {};

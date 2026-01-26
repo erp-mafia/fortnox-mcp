@@ -2,7 +2,48 @@
 
 An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish accounting system. This server enables LLMs to interact with Fortnox for managing invoices, customers, suppliers, accounts, and vouchers.
 
-## Quick Start (Claude Desktop)
+## Two Ways to Use
+
+| Mode | Best For | Setup |
+|------|----------|-------|
+| **Remote Mode** | End users | Just add URL, authorize in browser |
+| **Local Mode** | Developers, self-hosted | Configure environment variables |
+
+---
+
+## Quick Start: Remote Mode (Recommended)
+
+The easiest way to use Fortnox MCP - no credentials needed, just authorize in your browser.
+
+### 1. Add to Claude Desktop
+
+Open your Claude Desktop config file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add this configuration:
+
+```json
+{
+  "mcpServers": {
+    "fortnox": {
+      "url": "https://fortnox-mcp.vercel.app/mcp"
+    }
+  }
+}
+```
+
+### 2. Restart Claude Desktop
+
+### 3. Authorize
+
+When you first ask Claude to do something with Fortnox, a browser window will open for you to authorize access to your Fortnox account. Once authorized, you're all set!
+
+---
+
+## Quick Start: Local Mode (Self-Hosted)
+
+For developers who want to run the server locally or use their own Fortnox app credentials.
 
 ### 1. Get your Fortnox credentials
 
@@ -107,6 +148,8 @@ npm run build
 
 ### Environment Variables
 
+#### Local Mode (default)
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `FORTNOX_CLIENT_ID` | Yes | Your Fortnox app client ID |
@@ -115,6 +158,21 @@ npm run build
 | `FORTNOX_ACCESS_TOKEN` | No | Current access token (auto-refreshed) |
 | `TRANSPORT` | No | `stdio` (default) or `http` |
 | `PORT` | No | HTTP port (default: 3000) |
+
+#### Remote Mode (AUTH_MODE=remote)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AUTH_MODE` | Yes | Set to `remote` |
+| `SERVER_URL` | Yes | Public URL of your server |
+| `JWT_SECRET` | Yes | Secret for signing JWT tokens |
+| `FORTNOX_CLIENT_ID` | Yes | Your Fortnox app client ID |
+| `FORTNOX_CLIENT_SECRET` | Yes | Your Fortnox app client secret |
+| `UPSTASH_REDIS_REST_URL` | Yes* | Upstash Redis URL for token storage |
+| `UPSTASH_REDIS_REST_TOKEN` | Yes* | Upstash Redis token |
+| `PORT` | No | HTTP port (default: 3000) |
+
+*Falls back to in-memory storage if not provided (not recommended for production)
 
 ### Getting OAuth Credentials
 
@@ -250,6 +308,79 @@ The release script automatically:
 ### Users Get Updates Automatically
 
 When you publish a new version, users running `npx -y fortnox-mcp-server` will automatically get the latest version the next time they restart Claude Desktop.
+
+---
+
+## Deploying Your Own Remote Server
+
+Want to host your own instance of the Fortnox MCP server? Follow these instructions.
+
+### Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/jakobwennberg/fortnox-mcp)
+
+#### 1. Prerequisites
+
+- A [Vercel](https://vercel.com) account
+- An [Upstash Redis](https://upstash.com) database (for token storage)
+- A [Fortnox Developer](https://developer.fortnox.se) account with an app created
+
+#### 2. Set Environment Variables
+
+In your Vercel project settings, add these environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `AUTH_MODE` | Set to `remote` |
+| `SERVER_URL` | Your Vercel deployment URL (e.g., `https://your-app.vercel.app`) |
+| `JWT_SECRET` | A random secret string for signing tokens (generate with `openssl rand -hex 32`) |
+| `FORTNOX_CLIENT_ID` | Your Fortnox app client ID |
+| `FORTNOX_CLIENT_SECRET` | Your Fortnox app client secret |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token |
+
+#### 3. Configure Fortnox OAuth Callback
+
+In your Fortnox app settings, add this redirect URI:
+```
+https://your-app.vercel.app/oauth/fortnox/callback
+```
+
+#### 4. Deploy
+
+```bash
+vercel --prod
+```
+
+### Server Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /.well-known/oauth-authorization-server` | OAuth metadata |
+| `POST /authorize` | Start OAuth flow |
+| `POST /token` | Exchange code for tokens |
+| `GET /oauth/fortnox/callback` | Fortnox OAuth callback |
+| `POST /mcp` | Protected MCP endpoint |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    fortnox-mcp-server                       │
+├─────────────────────────────────────────────────────────────┤
+│   Mode: AUTH_MODE=local | remote                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   LOCAL MODE                    REMOTE MODE                 │
+│   ───────────                   ───────────                 │
+│   • Env var tokens              • OAuth flow                │
+│   • Single user                 • Multi-user                │
+│   • stdio or HTTP               • HTTP only                 │
+│                                 • Token storage (Redis)     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## License
 
