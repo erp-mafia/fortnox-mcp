@@ -127,7 +127,7 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     // Require valid Bearer token
     requireBearerAuth({
       verifier: oauthProvider,
-      resourceMetadataUrl: `${serverUrl}/.well-known/oauth-protected-resource/mcp`,
+      resourceMetadataUrl: `${serverUrl}/.well-known/oauth-protected-resource`,
     }),
     async (req: Request, res: Response) => {
       try {
