@@ -2,6 +2,24 @@ import { z } from "zod";
 import { ResponseFormat, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../constants.js";
 
 /**
+ * Date period enum for convenience date filtering
+ */
+export const DatePeriodEnum = z.enum([
+  "today",
+  "yesterday",
+  "this_week",
+  "last_week",
+  "this_month",
+  "last_month",
+  "this_quarter",
+  "last_quarter",
+  "this_year",
+  "last_year"
+]);
+
+export type DatePeriod = z.infer<typeof DatePeriodEnum>;
+
+/**
  * Invoice row schema for creating/updating invoices
  */
 export const InvoiceRowSchema = z.object({
@@ -82,6 +100,26 @@ export const ListInvoicesSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format")
     .optional()
     .describe("Filter by due date to (YYYY-MM-DD)"),
+  period: DatePeriodEnum
+    .optional()
+    .describe("Convenience date period filter (e.g., 'last_month', 'this_quarter'). Overrides from_date/to_date if provided."),
+  sortby: z.enum(["customername", "customernumber", "documentnumber", "invoicedate", "total"])
+    .optional()
+    .describe("Field to sort results by"),
+  sortorder: z.enum(["ascending", "descending"])
+    .default("ascending")
+    .describe("Sort order for results"),
+  fetch_all: z.boolean()
+    .default(false)
+    .describe("Fetch all results by auto-paginating through all pages. WARNING: May take time for large datasets (max 10,000 results)."),
+  min_amount: z.number()
+    .min(0)
+    .optional()
+    .describe("Filter invoices with total >= this amount (client-side filter, applied after fetching)"),
+  max_amount: z.number()
+    .min(0)
+    .optional()
+    .describe("Filter invoices with total <= this amount (client-side filter, applied after fetching)"),
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")

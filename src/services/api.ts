@@ -4,7 +4,11 @@ import { getCurrentUserId } from "../auth/context.js";
 import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
-  RATE_LIMIT_WINDOW_MS
+  RATE_LIMIT_WINDOW_MS,
+  MAX_FETCH_ALL_RESULTS,
+  MAX_FETCH_ALL_PAGES,
+  FETCH_ALL_PAGE_SIZE,
+  FETCH_ALL_DELAY_MS
 } from "../constants.js";
 
 // Rate limiting state
@@ -171,4 +175,133 @@ export function formatDate(date: Date): string {
  */
 export function parseDate(dateStr: string): Date {
   return new Date(dateStr);
+}
+
+/**
+ * Configuration for fetchAllPages
+ */
+export interface FetchAllConfig {
+  /** Maximum total results to fetch (default: MAX_FETCH_ALL_RESULTS) */
+  maxResults?: number;
+  /** Maximum pages to fetch (default: MAX_FETCH_ALL_PAGES) */
+  maxPages?: number;
+  /** Page size for each request (default: FETCH_ALL_PAGE_SIZE) */
+  pageSize?: number;
+  /** Delay between page requests in ms (default: FETCH_ALL_DELAY_MS) */
+  delayBetweenPages?: number;
+}
+
+/**
+ * Result from fetchAllPages
+ */
+export interface FetchAllResult<T> {
+  /** All items fetched */
+  items: T[];
+  /** Total count from API (may be higher than items.length if truncated) */
+  total: number;
+  /** Number of pages fetched */
+  pagesFetched: number;
+  /** Whether results were truncated due to limits */
+  truncated: boolean;
+  /** Reason for truncation if truncated is true */
+  truncationReason?: string;
+}
+
+/**
+ * Delay execution for specified milliseconds
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch all pages of a paginated Fortnox API endpoint
+ *
+ * This function automatically paginates through all results from a Fortnox endpoint.
+ * It includes safety limits to prevent runaway queries and respects rate limits.
+ *
+ * @param endpoint - API endpoint (e.g., "/3/invoices")
+ * @param params - Query parameters to pass to each request
+ * @param extractItems - Function to extract items array from response
+ * @param extractTotal - Function to extract total count from response
+ * @param config - Optional configuration for limits and delays
+ * @returns All items fetched with metadata about the fetch operation
+ *
+ * @example
+ * const result = await fetchAllPages<Invoice, InvoiceListResponse>(
+ *   "/3/invoices",
+ *   { filter: "unpaid" },
+ *   (r) => r.Invoices || [],
+ *   (r) => r.MetaInformation?.["@TotalResources"] || 0
+ * );
+ */
+export async function fetchAllPages<T, R>(
+  endpoint: string,
+  params: Record<string, string | number | boolean | undefined>,
+  extractItems: (response: R) => T[],
+  extractTotal: (response: R) => number,
+  config?: FetchAllConfig
+): Promise<FetchAllResult<T>> {
+  const maxResults = config?.maxResults ?? MAX_FETCH_ALL_RESULTS;
+  const maxPages = config?.maxPages ?? MAX_FETCH_ALL_PAGES;
+  const pageSize = config?.pageSize ?? FETCH_ALL_PAGE_SIZE;
+  const delayMs = config?.delayBetweenPages ?? FETCH_ALL_DELAY_MS;
+
+  const allItems: T[] = [];
+  let page = 1;
+  let total = 0;
+  let hasMore = true;
+  let truncated = false;
+  let truncationReason: string | undefined;
+
+  while (hasMore) {
+    // Check page limit
+    if (page > maxPages) {
+      truncated = true;
+      truncationReason = `Reached maximum page limit (${maxPages} pages). Use filters to narrow results.`;
+      break;
+    }
+
+    // Check result limit
+    if (allItems.length >= maxResults) {
+      truncated = true;
+      truncationReason = `Reached maximum result limit (${maxResults} items). Use filters to narrow results.`;
+      break;
+    }
+
+    // Make request
+    const response = await fortnoxRequest<R>(endpoint, "GET", undefined, {
+      ...params,
+      limit: pageSize,
+      page
+    });
+
+    const items = extractItems(response);
+    total = extractTotal(response);
+
+    if (items.length === 0) {
+      hasMore = false;
+    } else {
+      allItems.push(...items);
+
+      // Check if we've fetched all available items
+      if (allItems.length >= total) {
+        hasMore = false;
+      } else {
+        page++;
+        // Delay to respect rate limits (except on last page)
+        if (hasMore) {
+          await delay(delayMs);
+        }
+      }
+    }
+  }
+
+  return {
+    items: allItems,
+    total,
+    pagesFetched: page,
+    truncated,
+    truncationReason
+  };
 }

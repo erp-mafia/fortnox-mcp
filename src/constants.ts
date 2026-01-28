@@ -14,6 +14,12 @@ export const MAX_PAGE_SIZE = 100;
 // Token expiry buffer (refresh 5 minutes before expiry)
 export const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
+// Fetch-all safety limits for analytics queries
+export const MAX_FETCH_ALL_RESULTS = 10000;
+export const MAX_FETCH_ALL_PAGES = 100;
+export const FETCH_ALL_PAGE_SIZE = 100;
+export const FETCH_ALL_DELAY_MS = 250; // Stay under 25 req/5sec rate limit
+
 // Response format enum
 export enum ResponseFormat {
   MARKDOWN = "markdown",

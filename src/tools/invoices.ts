@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { fortnoxRequest } from "../services/api.js";
+import { fortnoxRequest, fetchAllPages } from "../services/api.js";
 import { ResponseFormat } from "../constants.js";
 import {
   buildToolResponse,
@@ -11,6 +11,7 @@ import {
   formatDetailMarkdown,
   buildPaginationMeta
 } from "../services/formatters.js";
+import { periodToDateRange, getPeriodDescription } from "../services/dateHelpers.js";
 import {
   ListInvoicesSchema,
   GetInvoiceSchema,
@@ -98,7 +99,8 @@ export function registerInvoiceTools(server: McpServer): void {
       title: "List Fortnox Invoices",
       description: `List invoices from Fortnox accounting system.
 
-Retrieves a paginated list of invoices with optional filtering by status, customer, or date range.
+Retrieves a paginated list of invoices with optional filtering by status, customer, date range, or amount.
+Supports convenience period filters and can fetch all results for large datasets.
 
 Args:
   - limit (number): Max results per page, 1-100 (default: 20)
@@ -107,18 +109,30 @@ Args:
   - customer_number (string): Filter by customer number
   - from_date (string): Filter invoices from this date (YYYY-MM-DD)
   - to_date (string): Filter invoices to this date (YYYY-MM-DD)
+  - period ('today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'this_year' | 'last_year'): Convenience date period, overrides from_date/to_date
   - from_final_pay_date (string): Filter by due date from (YYYY-MM-DD)
   - to_final_pay_date (string): Filter by due date to (YYYY-MM-DD)
+  - sortby ('customername' | 'customernumber' | 'documentnumber' | 'invoicedate' | 'total'): Field to sort by
+  - sortorder ('ascending' | 'descending'): Sort order (default: ascending)
+  - fetch_all (boolean): Fetch all results by auto-paginating (max 10,000 results)
+  - min_amount (number): Filter invoices >= this amount (client-side)
+  - max_amount (number): Filter invoices <= this amount (client-side)
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
-  List of invoices with document number, customer, dates, amounts, and status.
+  For JSON: { total, page, limit, count, has_more, total_pages, next_offset?, truncated?, invoices: [...] }
+  For Markdown: Formatted list with pagination info
 
 Examples:
   - List unpaid invoices: filter="unpaid"
-  - List overdue invoices: filter="unpaidoverdue"
-  - Invoices for a customer: customer_number="1001"
-  - Invoices this month: from_date="2025-01-01", to_date="2025-01-31"`,
+  - Last month's invoices: period="last_month"
+  - Top invoices by amount: sortby="total", sortorder="descending"
+  - All invoices over 10000: fetch_all=true, min_amount=10000
+  - Customer invoices this year: customer_number="1001", period="this_year"
+
+Error Handling:
+  - Returns "Error: Rate limit exceeded..." if API limit hit
+  - Returns truncation info if fetch_all hits safety limits`,
       inputSchema: ListInvoicesSchema,
       annotations: {
         readOnlyHint: true,
@@ -129,24 +143,84 @@ Examples:
     },
     async (params: ListInvoicesInput) => {
       try {
-        const queryParams: Record<string, string | number | boolean | undefined> = {
-          limit: params.limit,
-          page: params.page
-        };
+        // Build query params
+        const queryParams: Record<string, string | number | boolean | undefined> = {};
 
         if (params.filter) queryParams.filter = params.filter;
         if (params.customer_number) queryParams.customernumber = params.customer_number;
-        if (params.from_date) queryParams.fromdate = params.from_date;
-        if (params.to_date) queryParams.todate = params.to_date;
+
+        // Handle period convenience filter (overrides explicit dates)
+        if (params.period) {
+          const dateRange = periodToDateRange(params.period);
+          queryParams.fromdate = dateRange.from_date;
+          queryParams.todate = dateRange.to_date;
+        } else {
+          if (params.from_date) queryParams.fromdate = params.from_date;
+          if (params.to_date) queryParams.todate = params.to_date;
+        }
+
         if (params.from_final_pay_date) queryParams.fromfinalpaydate = params.from_final_pay_date;
         if (params.to_final_pay_date) queryParams.tofinalpaydate = params.to_final_pay_date;
 
-        const response = await fortnoxRequest<InvoiceListResponse>("/3/invoices", "GET", undefined, queryParams);
-        const invoices = response.Invoices || [];
-        const total = response.MetaInformation?.["@TotalResources"] || invoices.length;
+        // Handle sorting
+        if (params.sortby) queryParams.sortby = params.sortby;
+        if (params.sortorder) queryParams.sortorder = params.sortorder;
+
+        let invoices: FortnoxInvoiceListItem[];
+        let total: number;
+        let pagesFetched = 1;
+        let truncated = false;
+        let truncationReason: string | undefined;
+
+        if (params.fetch_all) {
+          // Use fetchAllPages for complete dataset
+          const result = await fetchAllPages<FortnoxInvoiceListItem, InvoiceListResponse>(
+            "/3/invoices",
+            queryParams,
+            (r) => r.Invoices || [],
+            (r) => r.MetaInformation?.["@TotalResources"] || 0
+          );
+          invoices = result.items;
+          total = result.total;
+          pagesFetched = result.pagesFetched;
+          truncated = result.truncated;
+          truncationReason = result.truncationReason;
+        } else {
+          // Single page request
+          queryParams.limit = params.limit;
+          queryParams.page = params.page;
+
+          const response = await fortnoxRequest<InvoiceListResponse>("/3/invoices", "GET", undefined, queryParams);
+          invoices = response.Invoices || [];
+          total = response.MetaInformation?.["@TotalResources"] || invoices.length;
+        }
+
+        // Apply client-side amount filters
+        if (params.min_amount !== undefined) {
+          invoices = invoices.filter(inv => (inv.Total || 0) >= params.min_amount!);
+        }
+        if (params.max_amount !== undefined) {
+          invoices = invoices.filter(inv => (inv.Total || 0) <= params.max_amount!);
+        }
+
+        // Build pagination metadata
+        const paginationMeta = params.fetch_all
+          ? {
+              total,
+              count: invoices.length,
+              fetched_all: true,
+              pages_fetched: pagesFetched,
+              truncated,
+              truncation_reason: truncationReason
+            }
+          : {
+              ...buildPaginationMeta(total, params.page, params.limit, invoices.length),
+              next_offset: params.page * params.limit < total ? params.page * params.limit : undefined
+            };
 
         const output = {
-          ...buildPaginationMeta(total, params.page, params.limit, invoices.length),
+          ...paginationMeta,
+          period_description: params.period ? getPeriodDescription(params.period) : undefined,
           invoices: invoices.map((inv) => ({
             document_number: inv.DocumentNumber,
             customer_number: inv.CustomerNumber,
@@ -165,23 +239,58 @@ Examples:
         if (params.response_format === ResponseFormat.JSON) {
           textContent = JSON.stringify(output, null, 2);
         } else {
-          textContent = formatListMarkdown(
-            "Invoices",
-            invoices,
-            total,
-            params.page,
-            params.limit,
-            (inv) => {
+          const title = params.period
+            ? `Invoices - ${getPeriodDescription(params.period)}`
+            : "Invoices";
+
+          if (params.fetch_all) {
+            // Custom formatting for fetch_all mode
+            const lines: string[] = [
+              `# ${title}`,
+              "",
+              `Showing ${invoices.length} of ${total} total invoices`,
+              `(${pagesFetched} pages fetched)`
+            ];
+
+            if (truncated) {
+              lines.push("");
+              lines.push(`⚠️ **Results truncated**: ${truncationReason}`);
+            }
+
+            lines.push("");
+
+            for (const inv of invoices) {
               const status = inv.Cancelled ? "CANCELLED" :
                 (inv.Balance === 0 ? "PAID" :
                   (inv.Booked ? "BOOKED" : "DRAFT"));
-              return `## Invoice #${inv.DocumentNumber}\n` +
-                `- **Customer**: ${inv.CustomerName || inv.CustomerNumber}\n` +
-                `- **Date**: ${formatDisplayDate(inv.InvoiceDate)} | **Due**: ${formatDisplayDate(inv.DueDate)}\n` +
-                `- **Total**: ${formatMoney(inv.Total, inv.Currency)} | **Balance**: ${formatMoney(inv.Balance, inv.Currency)}\n` +
-                `- **Status**: ${status}`;
+              lines.push(`## Invoice #${inv.DocumentNumber}`);
+              lines.push(`- **Customer**: ${inv.CustomerName || inv.CustomerNumber}`);
+              lines.push(`- **Date**: ${formatDisplayDate(inv.InvoiceDate)} | **Due**: ${formatDisplayDate(inv.DueDate)}`);
+              lines.push(`- **Total**: ${formatMoney(inv.Total, inv.Currency)} | **Balance**: ${formatMoney(inv.Balance, inv.Currency)}`);
+              lines.push(`- **Status**: ${status}`);
+              lines.push("");
             }
-          );
+
+            textContent = lines.join("\n");
+          } else {
+            textContent = formatListMarkdown(
+              title,
+              invoices,
+              total,
+              params.page,
+              params.limit,
+              (inv) => {
+                const status = inv.Cancelled ? "CANCELLED" :
+                  (inv.Balance === 0 ? "PAID" :
+                    (inv.Booked ? "BOOKED" : "DRAFT"));
+                return `## Invoice #${inv.DocumentNumber}\n` +
+                  `- **Customer**: ${inv.CustomerName || inv.CustomerNumber}\n` +
+                  `- **Date**: ${formatDisplayDate(inv.InvoiceDate)} | **Due**: ${formatDisplayDate(inv.DueDate)}\n` +
+                  `- **Total**: ${formatMoney(inv.Total, inv.Currency)} | **Balance**: ${formatMoney(inv.Balance, inv.Currency)}\n` +
+                  `- **Status**: ${status}`;
+              }
+            );
+          }
         }
 
         return buildToolResponse(textContent, output);
