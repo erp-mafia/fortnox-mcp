@@ -16,6 +16,7 @@ import { registerSupplierTools } from "../tools/suppliers.js";
 import { registerAccountTools } from "../tools/accounts.js";
 import { registerVoucherTools } from "../tools/vouchers.js";
 import { registerCompanyTools } from "../tools/company.js";
+import { registerAnalyticsTools } from "../tools/analytics.js";
 import { ITokenStorage } from "../auth/storage/types.js";
 
 export interface RemoteServerOptions {
@@ -120,6 +121,7 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
   registerAccountTools(mcpServer);
   registerVoucherTools(mcpServer);
   registerCompanyTools(mcpServer);
+  registerAnalyticsTools(mcpServer);
 
   // Protected MCP endpoint
   app.post(
