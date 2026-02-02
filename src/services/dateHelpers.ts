@@ -228,3 +228,155 @@ export function getPeriodDescription(period: DatePeriod): string {
   };
   return descriptions[period];
 }
+
+/**
+ * Get the previous equivalent period for comparison
+ *
+ * @param period - Current period
+ * @returns The previous equivalent period
+ *
+ * @example
+ * getPreviousPeriod("this_month") // "last_month"
+ * getPreviousPeriod("this_quarter") // "last_quarter"
+ */
+export function getPreviousPeriod(period: DatePeriod): DatePeriod {
+  const mapping: Record<DatePeriod, DatePeriod> = {
+    today: "yesterday",
+    yesterday: "yesterday", // Can't go further back simply
+    this_week: "last_week",
+    last_week: "last_week", // Would need custom logic for 2 weeks ago
+    this_month: "last_month",
+    last_month: "last_month", // Would need custom logic
+    this_quarter: "last_quarter",
+    last_quarter: "last_quarter", // Would need custom logic
+    this_year: "last_year",
+    last_year: "last_year" // Would need custom logic
+  };
+  return mapping[period];
+}
+
+/**
+ * Get ISO week number for a date
+ */
+export function getWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+/**
+ * Get quarter number (1-4) for a date
+ */
+export function getQuarterNumber(date: Date): number {
+  return Math.floor(date.getMonth() / 3) + 1;
+}
+
+/**
+ * Interface for period comparison results
+ */
+export interface PeriodComparison {
+  currentPeriod: {
+    period: DatePeriod;
+    description: string;
+    dateRange: DateRange;
+  };
+  previousPeriod: {
+    period: DatePeriod;
+    description: string;
+    dateRange: DateRange;
+  };
+}
+
+/**
+ * Compare two periods and get their date ranges
+ *
+ * @param currentPeriod - The current period to analyze
+ * @param comparePeriod - Optional period to compare to (defaults to previous equivalent)
+ * @returns Period comparison with date ranges
+ */
+export function comparePeriods(
+  currentPeriod: DatePeriod,
+  comparePeriod?: DatePeriod
+): PeriodComparison {
+  const previousPeriod = comparePeriod || getPreviousPeriod(currentPeriod);
+
+  return {
+    currentPeriod: {
+      period: currentPeriod,
+      description: getPeriodDescription(currentPeriod),
+      dateRange: periodToDateRange(currentPeriod)
+    },
+    previousPeriod: {
+      period: previousPeriod,
+      description: getPeriodDescription(previousPeriod),
+      dateRange: periodToDateRange(previousPeriod)
+    }
+  };
+}
+
+/**
+ * Get date ranges for the last N years
+ *
+ * @param years - Number of years to get (including current year)
+ * @returns Array of year info with date ranges
+ */
+export function getLastNYears(years: number): Array<{
+  year: number;
+  dateRange: DateRange;
+}> {
+  const currentYear = new Date().getFullYear();
+  const result: Array<{ year: number; dateRange: DateRange }> = [];
+
+  for (let i = 0; i < years; i++) {
+    const year = currentYear - i;
+    result.push({
+      year,
+      dateRange: {
+        from_date: `${year}-01-01`,
+        to_date: `${year}-12-31`
+      }
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Get the number of days between two dates
+ */
+export function daysBetween(date1: string, date2: string): number {
+  const d1 = new Date(date1);
+  const d2 = new Date(date2);
+  const diffTime = Math.abs(d2.getTime() - d1.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Check if a date falls within a due date range
+ */
+export function isDueDateInRange(
+  dueDate: string | undefined,
+  fromDate: string,
+  toDate: string
+): boolean {
+  if (!dueDate) return false;
+  return dueDate >= fromDate && dueDate <= toDate;
+}
+
+/**
+ * Get future date from today
+ */
+export function getFutureDate(daysAhead: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + daysAhead);
+  return date.toISOString().split("T")[0];
+}
+
+/**
+ * Get today's date as string
+ */
+export function getTodayString(): string {
+  return new Date().toISOString().split("T")[0];
+}

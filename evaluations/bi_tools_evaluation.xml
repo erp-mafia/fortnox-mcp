@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Business Intelligence Tools Evaluation Questions
+
+  These evaluation questions test the new BI analytics tools added to the Fortnox MCP.
+  Each question is:
+  - Independent: Not dependent on other questions
+  - Read-only: Only non-destructive operations
+  - Complex: May require multiple tool calls
+  - Realistic: Based on real business use cases
+  - Verifiable: Single, clear answer type
+
+  Note: Actual numeric answers will depend on the data in your Fortnox account.
+-->
+<evaluation>
+  <!-- Phase 1: MVP Tools -->
+
+  <qa_pair id="1">
+    <category>Cash Flow Forecast</category>
+    <tools>fortnox_cash_flow_forecast</tools>
+    <question>What is the total expected cash inflow from receivables due in the next 30 days?</question>
+    <expected_answer_type>monetary_amount</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_cash_flow_forecast with horizon_days=30</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns a specific monetary amount for expected receivables
+      - Shows breakdown by week or month
+      - Indicates how many invoices are included
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="2">
+    <category>Order Pipeline</category>
+    <tools>fortnox_list_orders, fortnox_order_pipeline</tools>
+    <question>How many orders from this year have not been converted to invoices yet, and what is their total value?</question>
+    <expected_answer_type>count_and_amount</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_order_pipeline with period="this_year", group_by="status"</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns count of pending (non-invoiced) orders
+      - Returns total value of pending orders
+      - Distinguishes between pending, invoiced, and cancelled
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="3">
+    <category>Sales Funnel</category>
+    <tools>fortnox_sales_funnel</tools>
+    <question>What is the conversion rate from offers to orders this year?</question>
+    <expected_answer_type>percentage</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_sales_funnel with period="this_year"</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns offer-to-order conversion rate as percentage
+      - Shows counts at each funnel stage
+      - May also show order-to-invoice rate
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="4">
+    <category>Product/Customer Performance</category>
+    <tools>fortnox_product_performance</tools>
+    <question>Who are the top 5 customers by revenue this year?</question>
+    <expected_answer_type>ranked_list</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_product_performance with period="this_year", top_n=5</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns ranked list of 5 customers
+      - Shows revenue amount for each
+      - Includes invoice count
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="5">
+    <category>Offers</category>
+    <tools>fortnox_list_offers</tools>
+    <question>How many open (unconverted) offers do we have, and what is their total potential value?</question>
+    <expected_answer_type>count_and_amount</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_list_offers with filter="ordernotcreated", fetch_all=true</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns count of open offers
+      - Returns total value of open offers
+      - May show breakdown by customer or date
+    </evaluation_criteria>
+  </qa_pair>
+
+  <!-- Phase 2: Financial Analysis Tools -->
+
+  <qa_pair id="6">
+    <category>Period Comparison</category>
+    <tools>fortnox_period_comparison</tools>
+    <question>How does this quarter's revenue compare to last quarter? What is the percentage change?</question>
+    <expected_answer_type>comparison_with_percentage</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_period_comparison with current_period="this_quarter", compare_to="last_quarter", metrics=["revenue"]</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns current quarter revenue
+      - Returns last quarter revenue
+      - Calculates percentage change
+      - Indicates if growth or decline
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="7">
+    <category>Customer Growth</category>
+    <tools>fortnox_customer_growth</tools>
+    <question>Which customers have shown the largest revenue decline comparing this year to last year?</question>
+    <expected_answer_type>ranked_list</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_customer_growth with current_period="this_year", compare_to="last_year", show="declining", top_n=10</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns list of declining customers
+      - Shows current vs previous revenue
+      - Shows percentage decline
+      - Sorted by largest decline
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="8">
+    <category>Multi-tool Analysis</category>
+    <tools>fortnox_cash_flow_forecast, fortnox_payables_report, fortnox_unpaid_report</tools>
+    <question>What is our net accounts receivable vs accounts payable position? Are we in a positive or negative cash position based on current unpaid invoices?</question>
+    <expected_answer_type>comparison_analysis</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_unpaid_report to get total receivables</call>
+      <call>fortnox_payables_report to get total payables</call>
+      <call>Or: fortnox_cash_flow_forecast which shows both</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns total accounts receivable
+      - Returns total accounts payable
+      - Calculates net position
+      - Indicates if positive (more receivables) or negative
+    </evaluation_criteria>
+  </qa_pair>
+
+  <!-- Phase 3: Advanced Analytics Tools -->
+
+  <qa_pair id="9">
+    <category>Yearly Comparison</category>
+    <tools>fortnox_yearly_comparison</tools>
+    <question>What has been our year-over-year revenue growth trend for the last 3 years?</question>
+    <expected_answer_type>trend_analysis</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_yearly_comparison with years=3, metrics=["revenue"]</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Returns revenue for each of the 3 years
+      - Shows YoY percentage change for each year
+      - Indicates growth trend direction
+    </evaluation_criteria>
+  </qa_pair>
+
+  <qa_pair id="10">
+    <category>Combined Analysis</category>
+    <tools>fortnox_sales_funnel, fortnox_period_comparison, fortnox_order_pipeline</tools>
+    <question>Has our sales funnel efficiency improved this quarter compared to last quarter? Consider both conversion rates and total pipeline value.</question>
+    <expected_answer_type>comparative_analysis</expected_answer_type>
+    <expected_tool_calls>
+      <call>fortnox_sales_funnel with period="this_quarter" for current funnel</call>
+      <call>fortnox_sales_funnel with period="last_quarter" for previous funnel</call>
+      <call>Or: fortnox_period_comparison to compare invoice metrics</call>
+    </expected_tool_calls>
+    <evaluation_criteria>
+      - Compares conversion rates between periods
+      - Compares pipeline values between periods
+      - Provides qualitative assessment of improvement/decline
+      - Uses multiple data points for analysis
+    </evaluation_criteria>
+  </qa_pair>
+
+</evaluation>
