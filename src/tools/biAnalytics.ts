@@ -228,32 +228,7 @@ export function registerBIAnalyticsTools(server: McpServer): void {
     "fortnox_cash_flow_forecast",
     {
       title: "Cash Flow Forecast",
-      description: `Generate a cash flow forecast based on unpaid invoices and supplier invoices.
-
-Answers questions like:
-- "What's our expected cash flow for the next 30/60/90 days?"
-- "When will we have cash flow problems?"
-- "What's our projected balance by week/month?"
-
-Args:
-  - horizon_days (number): Days to forecast ahead, 1-365 (default: 90)
-  - group_by ('week' | 'month'): How to group the forecast (default: 'week')
-  - include_overdue (boolean): Include overdue items in forecast (default: true)
-  - starting_balance (number): Optional starting cash balance
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Cash flow projection with expected inflows (receivables), outflows (payables),
-  net flow, and running balance per period.
-
-Examples:
-  - 90-day weekly forecast: (use defaults)
-  - Monthly view for 6 months: horizon_days=180, group_by="month"
-  - Exclude overdue: include_overdue=false
-
-Error Handling:
-  - Returns "Error: ..." if API calls fail
-  - Truncates at 10,000 items per category`,
+      description: `Generate cash flow forecast from unpaid receivables and payables. Shows expected inflows, outflows, net flow, and running balance grouped by week or month.`,
       inputSchema: CashFlowForecastSchema,
       annotations: {
         readOnlyHint: true,
@@ -430,27 +405,7 @@ Error Handling:
     "fortnox_order_pipeline",
     {
       title: "Order Pipeline Analytics",
-      description: `Analyze order pipeline and backlog status.
-
-Answers questions like:
-- "What's our current order backlog?"
-- "How many orders are pending conversion to invoices?"
-- "Show order pipeline by customer/month/status"
-
-Args:
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - group_by ('customer' | 'month' | 'status'): How to group statistics (default: status)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Order pipeline statistics grouped by the specified dimension.
-
-Examples:
-  - Order backlog by status: group_by="status"
-  - Orders by customer this year: period="this_year", group_by="customer"
-  - Monthly order trends: period="this_year", group_by="month"`,
+      description: `Analyze order pipeline and backlog. Shows pending vs invoiced orders grouped by status, customer, or month.`,
       inputSchema: OrderPipelineSchema,
       annotations: {
         readOnlyHint: true,
@@ -594,30 +549,7 @@ Examples:
     "fortnox_sales_funnel",
     {
       title: "Sales Funnel Analytics",
-      description: `Analyze the sales funnel from offers to orders to invoices.
-
-Answers questions like:
-- "What's our conversion rate from offers to orders to invoices?"
-- "How much revenue is in our sales pipeline?"
-- "What's the funnel efficiency this quarter?"
-
-Args:
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Sales funnel with counts and values at each stage:
-  - Offers: Total offers created
-  - Orders: Offers converted to orders
-  - Invoices: Orders converted to invoices
-
-Includes conversion rates between each stage.
-
-Examples:
-  - This year's funnel: period="this_year"
-  - Last quarter performance: period="last_quarter"`,
+      description: `Analyze sales funnel from offers to orders to invoices. Shows counts, values, and conversion rates at each stage.`,
       inputSchema: SalesFunnelSchema,
       annotations: {
         readOnlyHint: true,
@@ -784,29 +716,7 @@ Examples:
     "fortnox_product_performance",
     {
       title: "Product Performance Analytics",
-      description: `Analyze product/article sales performance.
-
-Answers questions like:
-- "Which products are our best sellers?"
-- "What's the revenue breakdown by product?"
-- "Top 10 products by quantity sold"
-
-Args:
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - metric ('revenue' | 'quantity' | 'invoice_count'): Ranking metric (default: revenue)
-  - top_n (number): Number of products to return, 1-100 (default: 20)
-  - include_trends (boolean): Compare to previous period (default: false)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Ranked list of products/articles by the selected metric.
-
-Examples:
-  - Top 20 by revenue this year: period="this_year"
-  - Top 10 by quantity: metric="quantity", top_n=10
-  - With trends: include_trends=true`,
+      description: `Analyze product/customer sales performance. Returns top performers ranked by revenue, quantity, or invoice count.`,
       inputSchema: ProductPerformanceSchema,
       annotations: {
         readOnlyHint: true,
@@ -954,26 +864,7 @@ Examples:
     "fortnox_period_comparison",
     {
       title: "Period Comparison Analytics",
-      description: `Compare business metrics across two time periods.
-
-Answers questions like:
-- "How are sales trending this quarter vs last quarter?"
-- "What's our year-over-year growth?"
-- "Compare this month to last month"
-
-Args:
-  - current_period ('today' | ... | 'last_year'): Current period to analyze (required)
-  - compare_to ('today' | ... | 'last_year'): Period to compare against (optional, defaults to previous)
-  - metrics (array): Metrics to compare: 'revenue', 'invoice_count', 'average_invoice', 'new_customers'
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Side-by-side comparison with absolute and percentage changes.
-
-Examples:
-  - This vs last month: current_period="this_month"
-  - This vs last quarter: current_period="this_quarter"
-  - YoY comparison: current_period="this_year", compare_to="last_year"`,
+      description: `Compare business metrics (revenue, invoice count, etc.) between two time periods with percentage changes.`,
       inputSchema: PeriodComparisonSchema,
       annotations: {
         readOnlyHint: true,
@@ -1095,28 +986,7 @@ Examples:
     "fortnox_customer_growth",
     {
       title: "Customer Growth Analytics",
-      description: `Identify growing and declining customers by comparing revenue across periods.
-
-Answers questions like:
-- "Which customers are growing vs declining?"
-- "Who are our fastest growing customers?"
-- "Which customers have we lost revenue from?"
-
-Args:
-  - current_period ('today' | ... | 'last_year'): Current period (required)
-  - compare_to ('today' | ... | 'last_year'): Comparison period (optional)
-  - min_revenue (number): Minimum revenue threshold in either period
-  - top_n (number): Number of customers to return, 1-100 (default: 20)
-  - show ('growing' | 'declining' | 'all'): Filter results (default: all)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  List of customers with revenue comparison and growth rates.
-
-Examples:
-  - Top growing customers this year: current_period="this_year", show="growing"
-  - Declining customers: show="declining"
-  - High-value customer trends: min_revenue=100000`,
+      description: `Identify growing and declining customers by comparing revenue across periods. Shows growth rates and trends.`,
       inputSchema: CustomerGrowthSchema,
       annotations: {
         readOnlyHint: true,
@@ -1280,29 +1150,7 @@ Examples:
     "fortnox_project_profitability",
     {
       title: "Project Profitability Analytics",
-      description: `Analyze profitability by project.
-
-Answers questions like:
-- "Which projects are profitable vs losing money?"
-- "What's the margin on each project?"
-- "Show project revenue and costs"
-
-Note: Requires projects to be used in your Fortnox setup.
-
-Args:
-  - project_number (string): Filter to specific project
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - include_details (boolean): Include breakdown of revenue/costs (default: false)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Project profitability with revenue, costs, and margin calculations.
-
-Examples:
-  - All projects this year: period="this_year"
-  - Specific project: project_number="P001"`,
+      description: `Analyze profitability by project. Lists projects with status. Requires projects in Fortnox setup.`,
       inputSchema: ProjectProfitabilitySchema,
       annotations: {
         readOnlyHint: true,
@@ -1421,30 +1269,7 @@ Examples:
     "fortnox_cost_center_analysis",
     {
       title: "Cost Center Analysis",
-      description: `Analyze costs by cost center/department.
-
-Answers questions like:
-- "How do departments compare in costs?"
-- "What's the cost breakdown by department?"
-- "Show spending by cost center"
-
-Note: Requires cost centers to be used in your Fortnox setup.
-
-Args:
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - cost_center (string): Filter to specific cost center code
-  - account_range_from (number): Start of account range
-  - account_range_to (number): End of account range
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Cost breakdown by cost center.
-
-Examples:
-  - All cost centers this year: period="this_year"
-  - Specific department: cost_center="SALES"`,
+      description: `Analyze costs by cost center/department. Lists cost centers. Requires cost centers in Fortnox setup.`,
       inputSchema: CostCenterAnalysisSchema,
       annotations: {
         readOnlyHint: true,
@@ -1542,30 +1367,7 @@ Examples:
     "fortnox_expense_analysis",
     {
       title: "Expense Analysis",
-      description: `Analyze expenses by account or account class.
-
-Answers questions like:
-- "What are our top expense categories?"
-- "How do expenses compare to last year?"
-- "Breakdown of operating expenses"
-
-Args:
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - account_range_from (number): Start of expense accounts (default: 4000)
-  - account_range_to (number): End of expense accounts (default: 8999)
-  - group_by ('account' | 'account_class'): Group by individual account or class (default: account_class)
-  - compare_to ('today' | ... | 'last_year'): Optional period for comparison
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Expense breakdown by account or account class with optional period comparison.
-
-Examples:
-  - Expense breakdown this year: period="this_year"
-  - Compare to last year: period="this_year", compare_to="last_year"
-  - Detailed by account: group_by="account"`,
+      description: `Analyze expenses by account or account class (4000-8999). Shows expense category structure.`,
       inputSchema: ExpenseAnalysisSchema,
       annotations: {
         readOnlyHint: true,
@@ -1651,24 +1453,7 @@ Examples:
     "fortnox_yearly_comparison",
     {
       title: "Yearly Comparison Analytics",
-      description: `Compare business metrics across multiple years.
-
-Answers questions like:
-- "How did we perform this year vs last year?"
-- "What's our multi-year revenue trend?"
-- "3-year comparison of key metrics"
-
-Args:
-  - years (number): Number of years to compare, 2-5 (default: 3)
-  - metrics (array): Metrics to compare: 'revenue', 'invoice_count', 'average_invoice', 'customer_count'
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Year-over-year comparison of selected metrics.
-
-Examples:
-  - Last 3 years: years=3
-  - 5-year revenue trend: years=5, metrics=["revenue"]`,
+      description: `Compare revenue and metrics across multiple years (2-5). Shows year-over-year growth trends.`,
       inputSchema: YearlyComparisonSchema,
       annotations: {
         readOnlyHint: true,
@@ -1800,30 +1585,7 @@ Examples:
     "fortnox_gross_margin_trend",
     {
       title: "Gross Margin Trend Analytics",
-      description: `Analyze gross margin trends over time.
-
-Answers questions like:
-- "What's our gross margin trend?"
-- "Is profitability improving or declining?"
-- "Monthly margin breakdown"
-
-Note: Requires proper revenue (3xxx) and COGS (4xxx) account setup.
-
-Args:
-  - period ('today' | ... | 'last_year'): Date period to analyze
-  - from_date (string): Start date YYYY-MM-DD (ignored if period specified)
-  - to_date (string): End date YYYY-MM-DD (ignored if period specified)
-  - group_by ('month' | 'quarter'): Time grouping (default: month)
-  - revenue_accounts (string): Revenue account range, e.g., "3000-3999"
-  - cogs_accounts (string): COGS account range, e.g., "4000-4999"
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  Gross margin trend with revenue, COGS, and margin calculations per period.
-
-Examples:
-  - Monthly trend this year: period="this_year"
-  - Quarterly view: group_by="quarter"`,
+      description: `Analyze gross margin trends by month or quarter. Requires revenue (3xxx) and COGS (4xxx) account setup.`,
       inputSchema: GrossMarginTrendSchema,
       annotations: {
         readOnlyHint: true,

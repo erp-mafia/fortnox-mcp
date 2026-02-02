@@ -108,35 +108,7 @@ export function registerOrderTools(server: McpServer): void {
     "fortnox_list_orders",
     {
       title: "List Fortnox Orders",
-      description: `List orders from Fortnox with optional filtering and pagination.
-
-Retrieves a paginated list of sales orders with optional filtering by status, customer, or date range.
-Orders represent confirmed customer purchases that may or may not have been invoiced yet.
-
-Args:
-  - limit (number): Max results per page, 1-100 (default: 20)
-  - page (number): Page number for pagination (default: 1)
-  - filter ('cancelled' | 'expired' | 'invoicecreated' | 'invoicenotcreated'): Filter by order status
-  - customer_number (string): Filter by customer number
-  - from_date (string): Filter orders from this date (YYYY-MM-DD)
-  - to_date (string): Filter orders to this date (YYYY-MM-DD)
-  - period ('today' | ... | 'last_year'): Convenience date period, overrides from_date/to_date
-  - sortby ('customername' | 'customernumber' | 'documentnumber' | 'orderdate' | 'total'): Sort field
-  - sortorder ('ascending' | 'descending'): Sort direction (default: ascending)
-  - fetch_all (boolean): Fetch all pages (max 10,000 results)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  List of orders with customer info, dates, totals, and status.
-
-Examples:
-  - All open orders: filter="invoicenotcreated"
-  - Orders this month: period="this_month"
-  - Customer's order history: customer_number="1001", period="this_year"
-
-Error Handling:
-  - Returns truncation warning if >10,000 orders
-  - Returns "Error: ..." if API call fails`,
+      description: `List sales orders with filtering by status, customer, date range. Filter: cancelled, expired, invoicecreated, invoicenotcreated.`,
       inputSchema: ListOrdersSchema,
       annotations: {
         readOnlyHint: true,
@@ -288,35 +260,7 @@ Error Handling:
     "fortnox_list_offers",
     {
       title: "List Fortnox Offers",
-      description: `List offers/quotes from Fortnox with optional filtering and pagination.
-
-Retrieves a paginated list of sales offers (quotes/proposals) with optional filtering by status, customer, or date range.
-Offers represent potential sales that may be converted to orders.
-
-Args:
-  - limit (number): Max results per page, 1-100 (default: 20)
-  - page (number): Page number for pagination (default: 1)
-  - filter ('cancelled' | 'expired' | 'ordercreated' | 'ordernotcreated'): Filter by offer status
-  - customer_number (string): Filter by customer number
-  - from_date (string): Filter offers from this date (YYYY-MM-DD)
-  - to_date (string): Filter offers to this date (YYYY-MM-DD)
-  - period ('today' | ... | 'last_year'): Convenience date period, overrides from_date/to_date
-  - sortby ('customername' | 'customernumber' | 'documentnumber' | 'offerdate' | 'total'): Sort field
-  - sortorder ('ascending' | 'descending'): Sort direction (default: ascending)
-  - fetch_all (boolean): Fetch all pages (max 10,000 results)
-  - response_format ('markdown' | 'json'): Output format
-
-Returns:
-  List of offers with customer info, dates, totals, and status.
-
-Examples:
-  - All open offers: filter="ordernotcreated"
-  - Offers this quarter: period="this_quarter"
-  - Show expired offers: filter="expired"
-
-Error Handling:
-  - Returns truncation warning if >10,000 offers
-  - Returns "Error: ..." if API call fails`,
+      description: `List sales offers/quotes with filtering by status, customer, date range. Filter: cancelled, expired, ordercreated, ordernotcreated.`,
       inputSchema: ListOffersSchema,
       annotations: {
         readOnlyHint: true,
