@@ -40,6 +40,7 @@ import { registerAccountTools } from "./tools/accounts.js";
 import { registerVoucherTools } from "./tools/vouchers.js";
 import { registerCompanyTools } from "./tools/company.js";
 import { registerAnalyticsTools } from "./tools/analytics.js";
+import { registerSupplierInvoiceTools } from "./tools/supplierInvoices.js";
 
 /**
  * Create and configure MCP server with all tools
@@ -54,6 +55,7 @@ function createMcpServer(): McpServer {
   registerCustomerTools(server);
   registerInvoiceTools(server);
   registerSupplierTools(server);
+  registerSupplierInvoiceTools(server);
   registerAccountTools(server);
   registerVoucherTools(server);
   registerCompanyTools(server);
