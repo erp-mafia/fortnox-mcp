@@ -59,8 +59,8 @@ export const ListVouchersSchema = z.object({
     .describe("Filter by voucher series (e.g., 'A', 'B')"),
   financial_year: z.number()
     .int()
-    .default(new Date().getFullYear())
-    .describe("Financial year (e.g., 2025). Defaults to current year."),
+    .optional()
+    .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
   from_date: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format")
     .optional()
@@ -91,7 +91,7 @@ export const GetVoucherSchema = z.object({
   financial_year: z.number()
     .int()
     .optional()
-    .describe("Financial year ID (defaults to current year)"),
+    .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")
@@ -165,8 +165,8 @@ export const AccountActivitySchema = z.object({
     .describe("Account number range (e.g., 3000-3999 for revenue accounts)"),
   financial_year: z.number()
     .int()
-    .default(new Date().getFullYear())
-    .describe("Financial year (e.g., 2025). Defaults to current year."),
+    .optional()
+    .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
   period: DatePeriodEnum
     .optional()
     .describe("Convenience date period filter (e.g., 'this_month', 'last_quarter'). Overrides from_date/to_date."),
@@ -211,8 +211,8 @@ export const SearchVouchersSchema = z.object({
     .describe("Text to search for in voucher descriptions (min 2 chars)"),
   financial_year: z.number()
     .int()
-    .default(new Date().getFullYear())
-    .describe("Financial year (e.g., 2025). Defaults to current year."),
+    .optional()
+    .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
   period: DatePeriodEnum
     .optional()
     .describe("Convenience date period filter (e.g., 'this_month', 'last_quarter'). Overrides from_date/to_date."),

@@ -7,6 +7,7 @@ import {
   buildErrorResponse,
   formatDetailMarkdown
 } from "../services/formatters.js";
+import { ListFinancialYearsSchema, type ListFinancialYearsInput } from "../schemas/projects.js";
 
 // Response format schema
 const CompanyInfoSchema = z.object({
@@ -41,6 +42,19 @@ interface FortnoxCompanyInfo {
 
 interface CompanyInfoResponse {
   CompanyInformation: FortnoxCompanyInfo;
+}
+
+// Financial year response types
+interface FortnoxFinancialYear {
+  Id: number;
+  FromDate: string;
+  ToDate: string;
+  AccountingMethod?: string;
+  "@url"?: string;
+}
+
+interface FinancialYearsResponse {
+  FinancialYears: FortnoxFinancialYear[];
 }
 
 /**
@@ -111,6 +125,74 @@ Returns:
             { label: "Fax", value: company.Fax },
             { label: "Website", value: company.WWW }
           ]);
+        }
+
+        return buildToolResponse(textContent, output);
+      } catch (error) {
+        return buildErrorResponse(error);
+      }
+    }
+  );
+
+  // List financial years
+  server.registerTool(
+    "fortnox_list_financial_years",
+    {
+      title: "List Financial Years",
+      description: `List all financial years configured in Fortnox.
+
+IMPORTANT: Voucher tools (fortnox_list_vouchers, fortnox_account_activity, etc.)
+use Fortnox sequential IDs (1, 2, 3...) NOT calendar years. Use this tool first
+to find the correct ID.
+
+Example: If ID 4 maps to 2025-01-01 to 2025-12-31, use financial_year=4 in voucher tools.
+
+Args:
+  - response_format ('markdown' | 'json'): Output format
+
+Returns:
+  List of financial years with ID, date range, and accounting method.`,
+      inputSchema: ListFinancialYearsSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params: ListFinancialYearsInput) => {
+      try {
+        const response = await fortnoxRequest<FinancialYearsResponse>("/3/financialyears");
+        const financialYears = response.FinancialYears || [];
+
+        const output = {
+          count: financialYears.length,
+          financial_years: financialYears.map((fy) => ({
+            id: fy.Id,
+            from_date: fy.FromDate,
+            to_date: fy.ToDate,
+            accounting_method: fy.AccountingMethod || null
+          }))
+        };
+
+        let textContent: string;
+        if (params.response_format === ResponseFormat.JSON) {
+          textContent = JSON.stringify(output, null, 2);
+        } else {
+          const lines = [
+            "# Financial Years",
+            "",
+            "Use the **ID** column when calling voucher tools (fortnox_list_vouchers, fortnox_account_activity, etc.).",
+            "",
+            "| ID | From Date | To Date | Accounting Method |",
+            "|----|-----------|---------|-------------------|"
+          ];
+
+          for (const fy of financialYears) {
+            lines.push(`| ${fy.Id} | ${fy.FromDate} | ${fy.ToDate} | ${fy.AccountingMethod || "-"} |`);
+          }
+
+          textContent = lines.join("\n");
         }
 
         return buildToolResponse(textContent, output);

@@ -1,6 +1,6 @@
 # Fortnox MCP Server
 
-An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish accounting system. This server enables LLMs to interact with Fortnox for managing invoices, customers, suppliers, accounts, and vouchers.
+An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish accounting system. This server enables LLMs to interact with Fortnox for managing invoices, customers, suppliers, orders, accounts, vouchers, and provides business intelligence analytics.
 
 ## Two Ways to Use
 
@@ -15,7 +15,14 @@ An MCP (Model Context Protocol) server for integrating with the Fortnox Swedish 
 
 The easiest way to use Fortnox MCP - no credentials needed, just authorize in your browser.
 
-### 1. Add to Claude Desktop
+### Option A: Add to Claude.ai (Web)
+
+1. Go to [claude.ai](https://claude.ai)
+2. Navigate to **Settings** → **Integrations** → **Add Integration**
+3. Enter the URL: `https://fortnox-mcp.vercel.app/mcp`
+4. Wait for it to load, then authorize access by clicking connect
+
+### Option B: Add to Claude Desktop
 
 Open your Claude Desktop config file:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -33,11 +40,7 @@ Add this configuration:
 }
 ```
 
-### 2. Restart Claude Desktop
-
-### 3. Authorize
-
-When you first ask Claude to do something with Fortnox, a browser window will open for you to authorize access to your Fortnox account. Once authorized, you're all set!
+Restart Claude Desktop. When you first ask Claude to do something with Fortnox, a browser window will open for you to authorize access to your Fortnox account. Once authorized, you're all set!
 
 ---
 
@@ -107,6 +110,16 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 - `fortnox_update_supplier` - Update supplier
 - `fortnox_delete_supplier` - Delete supplier
 
+### Supplier Invoice Management
+- `fortnox_list_supplier_invoices` - List supplier invoices with filtering
+- `fortnox_get_supplier_invoice` - Get supplier invoice details
+- `fortnox_approve_supplier_invoice` - Approve supplier invoice for payment
+- `fortnox_payables_report` - Get accounts payable aging report
+
+### Order Management
+- `fortnox_list_orders` - List sales orders with filtering
+- `fortnox_list_offers` - List offers/quotes with filtering
+
 ### Account Management
 - `fortnox_list_accounts` - List chart of accounts
 - `fortnox_get_account` - Get account details
@@ -119,9 +132,30 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 - `fortnox_get_voucher` - Get voucher details with rows
 - `fortnox_create_voucher` - Create manual voucher
 - `fortnox_list_voucher_series` - List available voucher series
+- `fortnox_account_activity` - Get activity for a specific account
+- `fortnox_search_vouchers` - Search vouchers by description, account, or amount
 
 ### Company Information
 - `fortnox_get_company_info` - Get company details
+- `fortnox_list_financial_years` - List company financial years
+
+### Analytics
+- `fortnox_invoice_summary` - Get invoice statistics by period
+- `fortnox_top_customers` - Get top customers by revenue
+- `fortnox_unpaid_report` - Get detailed unpaid invoice report
+
+### Business Intelligence
+- `fortnox_cash_flow_forecast` - Forecast cash flow based on invoices and payables
+- `fortnox_order_pipeline` - Analyze sales order pipeline
+- `fortnox_sales_funnel` - Analyze sales funnel from offers to invoices
+- `fortnox_product_performance` - Analyze product/article performance
+- `fortnox_period_comparison` - Compare financial metrics across periods
+- `fortnox_customer_growth` - Analyze customer acquisition and growth
+- `fortnox_project_profitability` - Analyze project profitability (if using projects)
+- `fortnox_cost_center_analysis` - Analyze costs by cost center
+- `fortnox_expense_analysis` - Analyze expenses by category
+- `fortnox_yearly_comparison` - Compare year-over-year performance
+- `fortnox_gross_margin_trend` - Track gross margin trends over time
 
 ## Installation
 

@@ -250,13 +250,26 @@ export function registerBIAnalyticsTools(server: McpServer): void {
           (r) => r.MetaInformation?.["@TotalResources"] || 0
         );
 
-        // Fetch unpaid supplier invoices (payables)
-        const payablesResult = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
-          "/3/supplierinvoices",
-          { filter: "unpaid" },
-          (r) => r.SupplierInvoices || [],
-          (r) => r.MetaInformation?.["@TotalResources"] || 0
-        );
+        // Fetch unpaid supplier invoices (payables) with error handling for missing scope
+        let payablesResult: { items: FortnoxSupplierInvoiceListItem[]; total: number; truncated: boolean; truncationReason?: string };
+        let supplierInvoicesWarning: string | undefined;
+
+        try {
+          payablesResult = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
+            "/3/supplierinvoices",
+            { filter: "unpaid" },
+            (r) => r.SupplierInvoices || [],
+            (r) => r.MetaInformation?.["@TotalResources"] || 0
+          );
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          if (msg.includes("behörighet") || msg.includes("403") || msg.includes("Permission") || msg.includes("scope")) {
+            supplierInvoicesWarning = "⚠️ Supplier invoices unavailable (missing scope). Outflows show as 0.";
+            payablesResult = { items: [], total: 0, truncated: false };
+          } else {
+            throw error;
+          }
+        }
 
         // Filter by due date range
         const filterByDueDate = (dueDate: string | undefined): boolean => {
@@ -338,7 +351,7 @@ export function registerBIAnalyticsTools(server: McpServer): void {
         const totalInflows = sumBy(receivables, inv => inv.Balance || 0);
         const totalOutflows = sumBy(payables, inv => inv.Balance || 0);
 
-        const output = {
+        const output: Record<string, unknown> = {
           forecast: {
             horizon_days: params.horizon_days,
             group_by: params.group_by,
@@ -360,13 +373,25 @@ export function registerBIAnalyticsTools(server: McpServer): void {
           truncation_reason: receivablesResult.truncationReason || payablesResult.truncationReason
         };
 
+        if (supplierInvoicesWarning) {
+          output.warning = supplierInvoicesWarning;
+        }
+
         let textContent: string;
         if (params.response_format === ResponseFormat.JSON) {
           textContent = JSON.stringify(output, null, 2);
         } else {
           const lines: string[] = [
             "# Cash Flow Forecast",
-            "",
+            ""
+          ];
+
+          if (supplierInvoicesWarning) {
+            lines.push(supplierInvoicesWarning);
+            lines.push("");
+          }
+
+          lines.push(
             `**Period**: ${today} to ${futureDate} (${params.horizon_days} days)`,
             `**Grouped by**: ${params.group_by}`,
             params.starting_balance ? `**Starting Balance**: ${formatMoney(params.starting_balance)}` : "",
@@ -383,14 +408,17 @@ export function registerBIAnalyticsTools(server: McpServer): void {
             "## Forecast by Period",
             "",
             formatCashFlowTable(periods)
-          ].filter(line => line !== "");
+          );
+
+          // Filter empty lines added by conditional starting_balance
+          const filteredLines = lines.filter(line => line !== "");
 
           if (output.truncated) {
-            lines.push("");
-            lines.push(`**Note**: ${output.truncation_reason}`);
+            filteredLines.push("");
+            filteredLines.push(`**Note**: ${output.truncation_reason}`);
           }
 
-          textContent = lines.join("\n");
+          textContent = filteredLines.join("\n");
         }
 
         return buildToolResponse(textContent, output);
@@ -1150,7 +1178,9 @@ export function registerBIAnalyticsTools(server: McpServer): void {
     "fortnox_project_profitability",
     {
       title: "Project Profitability Analytics",
-      description: `Analyze profitability by project. Lists projects with status. Requires projects in Fortnox setup.`,
+      description: `[LIMITED] Analyze profitability by project. Returns project list only.
+
+For actual project financials, use fortnox_account_activity with project filtering on vouchers.`,
       inputSchema: ProjectProfitabilitySchema,
       annotations: {
         readOnlyHint: true,
@@ -1269,7 +1299,9 @@ export function registerBIAnalyticsTools(server: McpServer): void {
     "fortnox_cost_center_analysis",
     {
       title: "Cost Center Analysis",
-      description: `Analyze costs by cost center/department. Lists cost centers. Requires cost centers in Fortnox setup.`,
+      description: `[LIMITED] Analyze costs by cost center/department. Returns cost center list only.
+
+For actual cost center data, use fortnox_account_activity with cost center filtering on vouchers.`,
       inputSchema: CostCenterAnalysisSchema,
       annotations: {
         readOnlyHint: true,
@@ -1367,7 +1399,9 @@ export function registerBIAnalyticsTools(server: McpServer): void {
     "fortnox_expense_analysis",
     {
       title: "Expense Analysis",
-      description: `Analyze expenses by account or account class (4000-8999). Shows expense category structure.`,
+      description: `[LIMITED] Analyze expenses by account class. Returns category structure only.
+
+For actual expense data, use fortnox_account_activity with account_range={from: 4000, to: 8999}.`,
       inputSchema: ExpenseAnalysisSchema,
       annotations: {
         readOnlyHint: true,
@@ -1585,7 +1619,11 @@ export function registerBIAnalyticsTools(server: McpServer): void {
     "fortnox_gross_margin_trend",
     {
       title: "Gross Margin Trend Analytics",
-      description: `Analyze gross margin trends by month or quarter. Requires revenue (3xxx) and COGS (4xxx) account setup.`,
+      description: `[LIMITED] Analyze gross margin trends. Returns formula and structure only.
+
+For actual margin data, use fortnox_account_activity with:
+- Revenue: account_range={from: 3000, to: 3999}
+- COGS: account_range={from: 4000, to: 4999}`,
       inputSchema: GrossMarginTrendSchema,
       annotations: {
         readOnlyHint: true,
