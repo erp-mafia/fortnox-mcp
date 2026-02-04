@@ -21,10 +21,7 @@ const JWT_ALGORITHM = "HS256";
 const ACCESS_TOKEN_EXPIRES_IN = 3600; // 1 hour
 const REFRESH_TOKEN_EXPIRES_IN = 90 * 24 * 3600; // 90 days
 
-/**
- * Pending authorization state
- * Links MCP OAuth request to Fortnox OAuth flow
- */
+// Links MCP <-> Fortnox OAuth
 interface PendingAuthorization {
   mcpClient: OAuthClientInformationFull;
   mcpParams: AuthorizationParams;
@@ -32,10 +29,6 @@ interface PendingAuthorization {
   createdAt: number;
 }
 
-/**
- * Issued authorization code state
- * Used to exchange code for tokens
- */
 interface IssuedCode {
   userId: string;
   clientId: string;
@@ -87,17 +80,10 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     return this._clientsStore;
   }
 
-  /**
-   * Get the database token provider for Fortnox API calls
-   */
   getTokenProvider(): DatabaseTokenProvider {
     return this.tokenProvider;
   }
 
-  /**
-   * Start the authorization flow
-   * Redirects to Fortnox OAuth
-   */
   async authorize(
     client: OAuthClientInformationFull,
     params: AuthorizationParams,
@@ -127,10 +113,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     res.redirect(fortnoxAuthUrl);
   }
 
-  /**
-   * Handle Fortnox OAuth callback
-   * Called by the callback route handler
-   */
   async handleFortnoxCallback(
     code: string,
     state: string
@@ -175,9 +157,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     };
   }
 
-  /**
-   * Get the code challenge for an authorization code
-   */
   async challengeForAuthorizationCode(
     _client: OAuthClientInformationFull,
     authorizationCode: string
@@ -189,9 +168,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     return issued.codeChallenge;
   }
 
-  /**
-   * Exchange authorization code for access token
-   */
   async exchangeAuthorizationCode(
     client: OAuthClientInformationFull,
     authorizationCode: string,
@@ -221,9 +197,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     return this.issueTokens(issued.userId, issued.clientId, issued.scopes);
   }
 
-  /**
-   * Exchange refresh token for new access token
-   */
   async exchangeRefreshToken(
     client: OAuthClientInformationFull,
     refreshToken: string,
@@ -250,9 +223,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     );
   }
 
-  /**
-   * Verify an access token
-   */
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     // Check if revoked
     if (this.revokedTokens.has(token)) {
@@ -272,9 +242,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     };
   }
 
-  /**
-   * Revoke a token
-   */
   async revokeToken(
     _client: OAuthClientInformationFull,
     request: OAuthTokenRevocationRequest
@@ -282,9 +249,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     this.revokedTokens.add(request.token);
   }
 
-  /**
-   * Issue new access and refresh tokens
-   */
   private async issueTokens(
     userId: string,
     clientId: string,
@@ -327,9 +291,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     };
   }
 
-  /**
-   * Verify a JWT token
-   */
   private async verifyToken(
     token: string,
     expectedType: "access" | "refresh"
@@ -362,9 +323,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     }
   }
 
-  /**
-   * Clean up old pending authorizations
-   */
   private cleanupPendingAuthorizations(): void {
     const maxAge = 10 * 60 * 1000; // 10 minutes
     const now = Date.now();
@@ -376,9 +334,6 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
     }
   }
 
-  /**
-   * Clean up old issued codes
-   */
   private cleanupIssuedCodes(): void {
     const maxAge = 5 * 60 * 1000; // 5 minutes
     const now = Date.now();
@@ -391,10 +346,7 @@ export class FortnoxProxyOAuthProvider implements OAuthServerProvider {
   }
 }
 
-/**
- * Simple in-memory clients store
- * Supports dynamic client registration
- */
+// Dynamic client registration store
 class InMemoryClientsStore implements OAuthRegisteredClientsStore {
   private clients: Map<string, OAuthClientInformationFull> = new Map();
 
@@ -417,9 +369,6 @@ class InMemoryClientsStore implements OAuthRegisteredClientsStore {
   }
 }
 
-/**
- * Get user ID from auth info
- */
 export function getUserIdFromAuth(auth: AuthInfo): string | undefined {
   return auth.extra?.userId as string | undefined;
 }

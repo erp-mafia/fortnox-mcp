@@ -44,16 +44,12 @@ import { registerSupplierInvoiceTools } from "./tools/supplierInvoices.js";
 import { registerOrderTools } from "./tools/orders.js";
 import { registerBIAnalyticsTools } from "./tools/biAnalytics.js";
 
-/**
- * Create and configure MCP server with all tools
- */
 function createMcpServer(): McpServer {
   const server = new McpServer({
     name: "fortnox-mcp-server",
     version: "1.0.0"
   });
 
-  // Register all tools
   registerCustomerTools(server);
   registerInvoiceTools(server);
   registerSupplierTools(server);
@@ -68,55 +64,30 @@ function createMcpServer(): McpServer {
   return server;
 }
 
-/**
- * Run the server with stdio transport (for local/CLI usage)
- */
 async function runStdio(): Promise<void> {
-  // Validate authentication on startup
   try {
     const auth = getFortnoxAuth();
     if (!auth.isAuthenticated()) {
-      console.error(
-        "WARNING: No authentication configured. Set FORTNOX_REFRESH_TOKEN environment variable."
-      );
-    } else {
-      console.error("[FortnoxMCP] Authentication configured, ready to connect");
+      throw new Error("FORTNOX_REFRESH_TOKEN not set");
     }
   } catch (error) {
-    console.error(
-      `ERROR: ${error instanceof Error ? error.message : String(error)}`
-    );
-    console.error(
-      "\nRequired environment variables:\n" +
-      "  FORTNOX_CLIENT_ID     - Your Fortnox app client ID\n" +
-      "  FORTNOX_CLIENT_SECRET - Your Fortnox app client secret\n" +
-      "  FORTNOX_REFRESH_TOKEN - OAuth2 refresh token from authorization"
-    );
+    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
 
   const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[FortnoxMCP] Server running via stdio");
 }
 
-/**
- * Run the server with HTTP transport (for local HTTP mode without OAuth)
- */
 async function runLocalHTTP(): Promise<void> {
-  // Validate authentication on startup
   try {
     const auth = getFortnoxAuth();
     if (!auth.isAuthenticated()) {
-      console.error(
-        "WARNING: No authentication configured. Set FORTNOX_REFRESH_TOKEN environment variable."
-      );
+      throw new Error("FORTNOX_REFRESH_TOKEN not set");
     }
   } catch (error) {
-    console.error(
-      `ERROR: ${error instanceof Error ? error.message : String(error)}`
-    );
+    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
 
@@ -145,14 +116,10 @@ async function runLocalHTTP(): Promise<void> {
 
   const port = parseInt(process.env.PORT || "3000", 10);
   app.listen(port, () => {
-    console.error(`[FortnoxMCP] Server running on http://localhost:${port}/mcp`);
-    console.error(`[FortnoxMCP] Health check: http://localhost:${port}/health`);
+    console.error(`[FortnoxMCP] http://localhost:${port}/mcp`);
   });
 }
 
-/**
- * Main entry point
- */
 async function main(): Promise<void> {
   try {
     const config = loadConfig();
@@ -181,5 +148,4 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the server
 main();

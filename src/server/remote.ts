@@ -23,33 +23,23 @@ import { registerBIAnalyticsTools } from "../tools/biAnalytics.js";
 import { ITokenStorage } from "../auth/storage/types.js";
 
 export interface RemoteServerOptions {
-  /** Server URL (e.g., https://fortnox-mcp.vercel.app) */
   serverUrl: string;
-  /** JWT secret for signing tokens */
   jwtSecret: string;
-  /** Token storage backend */
   tokenStorage: ITokenStorage;
-  /** Port to listen on (for local development) */
   port?: number;
 }
 
-/**
- * Create and configure the remote MCP server with OAuth support
- */
 export function createRemoteServer(options: RemoteServerOptions): Express {
   const { serverUrl, jwtSecret, tokenStorage } = options;
 
-  // Create OAuth provider
   const oauthProvider = new FortnoxProxyOAuthProvider(
     jwtSecret,
     serverUrl,
     tokenStorage
   );
 
-  // Initialize the global token provider for remote mode
   initializeTokenProvider(oauthProvider.getTokenProvider());
 
-  // Create Express app
   const app = express();
   app.use(express.json());
 
@@ -65,7 +55,6 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     });
   });
 
-  // Install MCP OAuth router (handles /.well-known/*, /authorize, /token, /register, /revoke)
   app.use(
     mcpAuthRouter({
       provider: oauthProvider,
@@ -91,7 +80,6 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
         return;
       }
 
-      // Handle the Fortnox callback
       const result = await oauthProvider.handleFortnoxCallback(
         code as string,
         state as string
@@ -111,13 +99,11 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     }
   });
 
-  // Create MCP server
   const mcpServer = new McpServer({
     name: "fortnox-mcp-server",
     version: "1.0.0",
   });
 
-  // Register all tools
   registerCustomerTools(mcpServer);
   registerInvoiceTools(mcpServer);
   registerSupplierTools(mcpServer);
@@ -132,14 +118,12 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
   // Protected MCP endpoint
   app.post(
     "/mcp",
-    // Require valid Bearer token
     requireBearerAuth({
       verifier: oauthProvider,
       resourceMetadataUrl: `${serverUrl}/.well-known/oauth-protected-resource`,
     }),
     async (req: Request, res: Response) => {
       try {
-        // Get user ID from auth
         const userId = req.auth ? getUserIdFromAuth(req.auth) : undefined;
 
         if (!userId) {
@@ -147,7 +131,6 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
           return;
         }
 
-        // Create transport for this request
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
           enableJsonResponse: true,
@@ -155,7 +138,6 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
 
         res.on("close", () => transport.close());
 
-        // Run MCP request within user context
         await runWithContext({ userId }, async () => {
           await mcpServer.connect(transport);
           await transport.handleRequest(req, res, req.body);
@@ -176,20 +158,11 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
   return app;
 }
 
-/**
- * Start the remote server (for local development)
- */
 export async function runRemoteServer(options: RemoteServerOptions): Promise<void> {
   const app = createRemoteServer(options);
   const port = options.port || parseInt(process.env.PORT || "3000", 10);
 
   app.listen(port, () => {
-    console.error(`[FortnoxMCP] Remote server running on http://localhost:${port}`);
-    console.error(`[FortnoxMCP] OAuth endpoints:`);
-    console.error(`  - Metadata: http://localhost:${port}/.well-known/oauth-authorization-server`);
-    console.error(`  - Authorize: http://localhost:${port}/authorize`);
-    console.error(`  - Token: http://localhost:${port}/token`);
-    console.error(`[FortnoxMCP] MCP endpoint: http://localhost:${port}/mcp`);
-    console.error(`[FortnoxMCP] Health check: http://localhost:${port}/health`);
+    console.error(`[FortnoxMCP] Remote server: http://localhost:${port}`);
   });
 }

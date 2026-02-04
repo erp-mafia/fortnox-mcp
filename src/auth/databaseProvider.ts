@@ -4,10 +4,7 @@ import { ITokenProvider, TokenInfo, AuthRequiredError } from "./types.js";
 import { ITokenStorage } from "./storage/types.js";
 import { getFortnoxCredentials } from "./credentials.js";
 
-/**
- * Token provider that stores tokens in a database
- * Used for remote mode where multiple users access the same server
- */
+// Token provider for remote mode (multi-user with database storage)
 export class DatabaseTokenProvider implements ITokenProvider {
   private clientId: string;
   private clientSecret: string;
@@ -21,9 +18,6 @@ export class DatabaseTokenProvider implements ITokenProvider {
     this.storage = storage;
   }
 
-  /**
-   * Get a valid access token for a user, refreshing if necessary
-   */
   async getAccessToken(userId?: string): Promise<string> {
     if (!userId) {
       throw new AuthRequiredError();
@@ -50,49 +44,29 @@ export class DatabaseTokenProvider implements ITokenProvider {
     return tokens.accessToken;
   }
 
-  /**
-   * Check if authentication is available for a user
-   */
   isAuthenticated(userId?: string): boolean {
     // For async storage, we can't check synchronously
     // Return true and let getAccessToken throw if not authenticated
     return !!userId;
   }
 
-  /**
-   * Get current token info for a user
-   */
   getTokenInfo(userId?: string): TokenInfo | null {
     // For async storage, return null (caller should use async methods)
     return null;
   }
 
-  /**
-   * Get token info asynchronously
-   */
   async getTokenInfoAsync(userId: string): Promise<TokenInfo | null> {
     return this.storage.get(userId);
   }
 
-  /**
-   * Store tokens for a user (called after OAuth flow)
-   */
   async storeTokens(userId: string, tokens: TokenInfo): Promise<void> {
     await this.storage.set(userId, tokens);
-    console.error(`[DatabaseAuth] Stored tokens for user ${userId}, expires at: ${new Date(tokens.expiresAt).toISOString()}`);
   }
 
-  /**
-   * Delete tokens for a user
-   */
   async deleteTokens(userId: string): Promise<void> {
     await this.storage.delete(userId);
-    console.error(`[DatabaseAuth] Deleted tokens for user ${userId}`);
   }
 
-  /**
-   * Exchange authorization code for tokens
-   */
   async exchangeAuthorizationCode(
     code: string,
     redirectUri: string,
@@ -137,9 +111,6 @@ export class DatabaseTokenProvider implements ITokenProvider {
     }
   }
 
-  /**
-   * Refresh access token for a user
-   */
   private async refreshAccessToken(userId: string, tokens: TokenInfo): Promise<string> {
     if (!tokens.refreshToken) {
       throw new Error("No refresh token available");
@@ -185,9 +156,6 @@ export class DatabaseTokenProvider implements ITokenProvider {
     }
   }
 
-  /**
-   * Get Fortnox OAuth authorization URL
-   */
   getAuthorizationUrl(redirectUri: string, scopes: string[], state?: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
@@ -204,9 +172,6 @@ export class DatabaseTokenProvider implements ITokenProvider {
     return `${FORTNOX_OAUTH_URL}/auth?${params.toString()}`;
   }
 
-  /**
-   * Handle authentication errors
-   */
   private handleAuthError(error: unknown, context: string): Error {
     if (error instanceof AxiosError) {
       const status = error.response?.status;

@@ -1,8 +1,3 @@
-/**
- * Token storage module
- * Provides different storage backends for persisting user tokens
- */
-
 export * from "./types.js";
 export { MemoryTokenStorage, getMemoryStorage } from "./memory.js";
 export {
@@ -18,9 +13,6 @@ import { UpstashRedisTokenStorage } from "./vercelKV.js";
 
 export type StorageType = "memory" | "vercel-kv" | "upstash-redis";
 
-/**
- * Create a token storage instance based on type
- */
 export function createTokenStorage(type: StorageType): ITokenStorage {
   switch (type) {
     case "vercel-kv":
@@ -32,9 +24,6 @@ export function createTokenStorage(type: StorageType): ITokenStorage {
   }
 }
 
-/**
- * Get the appropriate storage based on environment
- */
 export function getStorageFromEnv(): ITokenStorage {
   const storageType = process.env.TOKEN_STORAGE as StorageType | undefined;
 

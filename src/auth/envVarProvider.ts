@@ -11,10 +11,7 @@ interface TokenResponse {
   scope: string;
 }
 
-/**
- * Token provider that reads from environment variables
- * Used for local mode (npx) where user provides their own refresh token
- */
+// Local mode token provider
 export class EnvVarTokenProvider implements ITokenProvider {
   private clientId: string;
   private clientSecret: string;
@@ -40,10 +37,6 @@ export class EnvVarTokenProvider implements ITokenProvider {
     }
   }
 
-  /**
-   * Get a valid access token, refreshing if necessary
-   * userId parameter is ignored in local mode (single user)
-   */
   async getAccessToken(_userId?: string): Promise<string> {
     if (!this.tokens) {
       throw new AuthRequiredError();
@@ -63,23 +56,14 @@ export class EnvVarTokenProvider implements ITokenProvider {
     return this.tokens.accessToken;
   }
 
-  /**
-   * Check if we have valid authentication
-   */
   isAuthenticated(_userId?: string): boolean {
     return this.tokens !== null && this.tokens.refreshToken !== "";
   }
 
-  /**
-   * Get current token info
-   */
   getTokenInfo(_userId?: string): TokenInfo | null {
     return this.tokens;
   }
 
-  /**
-   * Exchange authorization code for tokens (initial OAuth flow)
-   */
   async exchangeAuthorizationCode(code: string, redirectUri: string): Promise<void> {
     const tokenUrl = `${FORTNOX_OAUTH_URL}/token`;
     const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64");
@@ -106,9 +90,6 @@ export class EnvVarTokenProvider implements ITokenProvider {
     }
   }
 
-  /**
-   * Get the OAuth authorization URL for user consent
-   */
   getAuthorizationUrl(redirectUri: string, scopes: string[], state?: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
@@ -125,9 +106,6 @@ export class EnvVarTokenProvider implements ITokenProvider {
     return `${FORTNOX_OAUTH_URL}/auth?${params.toString()}`;
   }
 
-  /**
-   * Refresh the access token using the refresh token
-   */
   private async refreshAccessToken(): Promise<string> {
     if (!this.tokens?.refreshToken) {
       throw new Error("No refresh token available");
@@ -159,9 +137,6 @@ export class EnvVarTokenProvider implements ITokenProvider {
     }
   }
 
-  /**
-   * Store tokens from OAuth response
-   */
   private storeTokens(response: TokenResponse): void {
     this.tokens = {
       accessToken: response.access_token,
@@ -169,15 +144,8 @@ export class EnvVarTokenProvider implements ITokenProvider {
       expiresAt: Date.now() + response.expires_in * 1000,
       scope: response.scope
     };
-
-    console.error(`[FortnoxAuth] Token refreshed, expires at: ${new Date(this.tokens.expiresAt).toISOString()}`);
-    console.error(`[FortnoxAuth] New refresh token: ${response.refresh_token}`);
-    console.error(`[FortnoxAuth] UPDATE your config with the new FORTNOX_REFRESH_TOKEN above!`);
   }
 
-  /**
-   * Handle authentication errors with descriptive messages
-   */
   private handleAuthError(error: unknown, context: string): Error {
     if (error instanceof AxiosError) {
       const status = error.response?.status;
