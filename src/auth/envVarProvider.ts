@@ -2,6 +2,7 @@ import axios, { AxiosError } from "axios";
 import { FORTNOX_OAUTH_URL, TOKEN_REFRESH_BUFFER_MS } from "../constants.js";
 import { ITokenProvider, TokenInfo, AuthRequiredError } from "./types.js";
 import { getFortnoxCredentials } from "./credentials.js";
+import { readPersistedTokens, persistTokens } from "./fileTokenStore.js";
 
 interface TokenResponse {
   access_token: string;
@@ -23,15 +24,23 @@ export class EnvVarTokenProvider implements ITokenProvider {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
 
-    // Initialize from environment if tokens provided
-    const refreshToken = process.env.FORTNOX_REFRESH_TOKEN;
-    const accessToken = process.env.FORTNOX_ACCESS_TOKEN;
+    // Initialize tokens: prefer persisted file (has latest refresh token),
+    // fall back to environment variables for first-time setup
+    const persisted = readPersistedTokens();
+    const envRefreshToken = process.env.FORTNOX_REFRESH_TOKEN;
 
-    if (refreshToken) {
+    if (persisted?.refreshToken) {
       this.tokens = {
-        accessToken: accessToken || "",
-        refreshToken: refreshToken,
-        expiresAt: accessToken ? Date.now() + 3600000 : 0,
+        accessToken: persisted.accessToken || "",
+        refreshToken: persisted.refreshToken,
+        expiresAt: persisted.expiresAt || 0,
+        scope: persisted.scope || process.env.FORTNOX_SCOPE || ""
+      };
+    } else if (envRefreshToken) {
+      this.tokens = {
+        accessToken: process.env.FORTNOX_ACCESS_TOKEN || "",
+        refreshToken: envRefreshToken,
+        expiresAt: process.env.FORTNOX_ACCESS_TOKEN ? Date.now() + 3600000 : 0,
         scope: process.env.FORTNOX_SCOPE || ""
       };
     }
@@ -138,12 +147,15 @@ export class EnvVarTokenProvider implements ITokenProvider {
   }
 
   private storeTokens(response: TokenResponse): void {
+    const expiresAt = Date.now() + response.expires_in * 1000;
     this.tokens = {
       accessToken: response.access_token,
       refreshToken: response.refresh_token,
-      expiresAt: Date.now() + response.expires_in * 1000,
+      expiresAt,
       scope: response.scope
     };
+    // Persist to file so new refresh token survives process restarts
+    persistTokens(response.refresh_token, response.access_token, expiresAt, response.scope);
   }
 
   private handleAuthError(error: unknown, context: string): Error {

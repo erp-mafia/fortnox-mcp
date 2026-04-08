@@ -188,7 +188,7 @@ npm run build
 |----------|----------|-------------|
 | `FORTNOX_CLIENT_ID` | Yes | Your Fortnox app client ID |
 | `FORTNOX_CLIENT_SECRET` | Yes | Your Fortnox app client secret |
-| `FORTNOX_REFRESH_TOKEN` | Yes | OAuth2 refresh token |
+| `FORTNOX_REFRESH_TOKEN` | Yes | OAuth2 refresh token (only needed for initial setup; automatically persisted after first use) |
 | `FORTNOX_ACCESS_TOKEN` | No | Current access token (auto-refreshed) |
 | `TRANSPORT` | No | `stdio` (default) or `http` |
 | `PORT` | No | HTTP port (default: 3000) |
@@ -310,6 +310,17 @@ This server is published to multiple registries for easy installation:
 4. **Claude can now use tools** like `fortnox_list_invoices`, `fortnox_create_customer`, etc.
 5. **Server handles API calls** to Fortnox, including automatic token refresh and rate limiting
 
+### Token Persistence (Local Mode)
+
+Fortnox refresh tokens are single-use — each token refresh returns a new one. The server automatically persists the latest refresh token to `~/.fortnox-mcp/tokens.json` so it survives process restarts without requiring manual config updates.
+
+- On first run, the server reads `FORTNOX_REFRESH_TOKEN` from your environment/config
+- After each token refresh, the new refresh token is saved to `~/.fortnox-mcp/tokens.json`
+- On subsequent restarts, the server uses the persisted token (which is always the latest)
+- If the persisted file is missing or corrupt, the server falls back to the environment variable
+
+The token file is created with restricted permissions (`0600`) for security.
+
 ### Releasing New Versions
 
 To release a new version, use the release script:
@@ -411,7 +422,8 @@ vercel --prod
 │   • Env var tokens              • OAuth flow                │
 │   • Single user                 • Multi-user                │
 │   • stdio or HTTP               • HTTP only                 │
-│                                 • Token storage (Redis)     │
+│   • Auto-persisted tokens       • Token storage (Redis)     │
+│     (~/.fortnox-mcp/)                                       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
