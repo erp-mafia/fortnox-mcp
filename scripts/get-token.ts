@@ -17,8 +17,18 @@ import http from "http";
 import { URL } from "url";
 import readline from "readline";
 
-const CLIENT_ID = process.env.FORTNOX_CLIENT_ID || "A3fjvEGS3mUw";
-const CLIENT_SECRET = process.env.FORTNOX_CLIENT_SECRET || "REDACTED";
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Error: ${name} must be set in your environment.`);
+    console.error("Register an app at https://developer.fortnox.se to get your credentials.");
+    process.exit(1);
+  }
+  return value;
+}
+
+const CLIENT_ID = requireEnv("FORTNOX_CLIENT_ID");
+const CLIENT_SECRET = requireEnv("FORTNOX_CLIENT_SECRET");
 const REDIRECT_PORT = 8888;
 const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/callback`;
 
