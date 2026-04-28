@@ -71,12 +71,12 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
 
       if (error) {
         console.error(`[OAuth] Fortnox error: ${error} - ${error_description}`);
-        res.status(400).send(`OAuth error: ${error_description || error}`);
+        res.status(400).type("text").send(`OAuth error: ${error_description || error}`);
         return;
       }
 
       if (!code || !state) {
-        res.status(400).send("Missing code or state parameter");
+        res.status(400).type("text").send("Missing code or state parameter");
         return;
       }
 
@@ -95,7 +95,7 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
       res.redirect(redirectUrl.toString());
     } catch (error) {
       console.error("[OAuth] Callback error:", error);
-      res.status(500).send("OAuth callback failed");
+      res.status(500).type("text").send("OAuth callback failed");
     }
   });
 
