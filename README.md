@@ -211,9 +211,19 @@ npm run build
 ### Getting OAuth Credentials
 
 1. Register as a developer at [Fortnox Developer Portal](https://developer.fortnox.se)
-2. Create a new application to get Client ID and Client Secret
-3. Complete the OAuth2 authorization flow to obtain a refresh token
-4. Set the environment variables
+2. Create a new application to get your **Client ID** and **Client Secret**
+3. Make sure the following **scopes** are enabled for your app: `companyinformation`, `customer`, `invoice`, `supplier`, `bookkeeping`
+4. Set your redirect URI to `http://localhost:8888/callback` in your Fortnox app settings
+5. Run the token helper script:
+
+   ```bash
+   FORTNOX_CLIENT_ID=your-client-id FORTNOX_CLIENT_SECRET=your-client-secret npm run get-token
+   ```
+
+6. A URL will be printed — open it in your browser
+7. Log in to Fortnox and authorize the application
+8. You'll be redirected back automatically and the script will display your **Refresh Token**
+9. Use the displayed credentials in your environment variables or Claude Desktop config
 
 ## Usage
 
