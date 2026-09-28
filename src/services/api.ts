@@ -92,6 +92,51 @@ export async function fortnoxRequest<T>(
 }
 
 /**
+ * Upload a binary file to Fortnox (multipart/form-data).
+ * Used for inbox receipt uploads. Do not set JSON Content-Type.
+ */
+export async function fortnoxUploadFile<T>(
+  endpoint: string,
+  filename: string,
+  content: Buffer,
+  params?: Record<string, string | number | boolean | undefined>
+): Promise<T> {
+  await waitForRateLimit();
+
+  const tokenProvider = getTokenProvider();
+  const userId = getCurrentUserId();
+  const accessToken = await tokenProvider.getAccessToken(userId);
+
+  const cleanParams: Record<string, string | number | boolean> = {};
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        cleanParams[key] = value;
+      }
+    }
+  }
+
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(content)]), filename);
+
+  try {
+    const response = await axios.post(`${FORTNOX_API_BASE_URL}${endpoint}`, form, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+      params: Object.keys(cleanParams).length > 0 ? cleanParams : undefined,
+      timeout: 60000,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    });
+    return response.data as T;
+  } catch (error) {
+    throw handleApiError(error, endpoint);
+  }
+}
+
+/**
  * Handle API errors with descriptive messages
  */
 export function handleApiError(error: unknown, context?: string): Error {
