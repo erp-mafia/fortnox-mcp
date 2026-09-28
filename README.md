@@ -135,6 +135,12 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 - `fortnox_account_activity` - Get activity for a specific account
 - `fortnox_search_vouchers` - Search vouchers by description, account, or amount
 
+### Receipt / Document Upload
+- `fortnox_upload_receipt` - Upload PDF/JPG to Fortnox inbox (`inbox_v` / `inbox_s`) and optionally attach to a voucher
+- `fortnox_connect_file_to_voucher` - Attach an already uploaded inbox file to a voucher
+
+Requires OAuth scopes `inbox` and `connectfile`. After deploying scope changes, users must re-authorize the remote MCP once.
+
 ### Company Information
 - `fortnox_get_company_info` - Get company details
 - `fortnox_list_financial_years` - List company financial years
