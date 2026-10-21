@@ -120,8 +120,9 @@ export function handleApiError(error: unknown, context?: string): Error {
         );
       case 403:
         return new Error(
-          `${prefix}Permission denied. Your API credentials don't have access to this resource. ` +
-          `Check your Fortnox app scopes.`
+          `${prefix}Permission denied: ${fortnoxError || "Your API credentials don't have access to this resource"}. ` +
+          `Check that the required scope was granted when authorizing (re-authorize after adding scopes) ` +
+          `and that the Fortnox user has permission for this action.`
         );
       case 404:
         return new Error(
