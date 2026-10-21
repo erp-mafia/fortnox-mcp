@@ -23,7 +23,8 @@ export const ListSupplierInvoicesSchema = z.object({
     "unpaid",
     "unpaidoverdue",
     "unbooked",
-    "pendingpayment"
+    "pendingpayment",
+    "authorizepending"
   ])
     .optional()
     .describe("Filter supplier invoices by status"),

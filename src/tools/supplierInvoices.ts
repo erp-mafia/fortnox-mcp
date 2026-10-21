@@ -113,7 +113,7 @@ Retrieves a paginated list of supplier invoices with optional filtering by statu
 Args:
   - limit (number): Max results per page, 1-100 (default: 20)
   - page (number): Page number for pagination (default: 1)
-  - filter ('cancelled' | 'fullypaid' | 'unpaid' | 'unpaidoverdue' | 'unbooked' | 'pendingpayment'): Filter by invoice status
+  - filter ('cancelled' | 'fullypaid' | 'unpaid' | 'unpaidoverdue' | 'unbooked' | 'pendingpayment' | 'authorizepending'): Filter by invoice status ('authorizepending' = waiting for approval/attest)
   - supplier_number (string): Filter by supplier number
   - from_date (string): Filter invoices from this date (YYYY-MM-DD)
   - to_date (string): Filter invoices to this date (YYYY-MM-DD)
