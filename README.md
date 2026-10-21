@@ -212,7 +212,7 @@ npm run build
 
 1. Register as a developer at [Fortnox Developer Portal](https://developer.fortnox.se)
 2. Create a new application to get your **Client ID** and **Client Secret**
-3. Make sure the following **scopes** are enabled for your app: `companyinformation`, `customer`, `invoice`, `supplier`, `bookkeeping`
+3. Make sure the following **scopes** are enabled for your app: `companyinformation`, `customer`, `invoice`, `supplier`, `supplierinvoice`, `bookkeeping`
 4. Set your redirect URI to `http://localhost:8888/callback` in your Fortnox app settings
 5. Run the token helper script:
 

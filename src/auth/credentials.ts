@@ -54,5 +54,6 @@ export const FORTNOX_SCOPES = [
   "customer",
   "invoice",
   "supplier",
+  "supplierinvoice",
   "bookkeeping"
 ];

@@ -36,6 +36,7 @@ const SCOPES = [
   "customer",
   "invoice",
   "supplier",
+  "supplierinvoice",
   "bookkeeping",
   "companyinformation"
 ];
