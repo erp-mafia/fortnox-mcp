@@ -152,6 +152,68 @@ export async function fortnoxRequest<T>(
 }
 
 /**
+ * A file downloaded from the Fortnox API
+ */
+export interface DownloadedFile {
+  data: Buffer;
+  contentType: string | null;
+  fileName: string | null;
+}
+
+function fileNameFromContentDisposition(header: unknown): string | null {
+  if (typeof header !== "string") return null;
+  const encoded = header.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      // fall through to the plain filename
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : null;
+}
+
+/**
+ * Download a binary file (GET) from the Fortnox API
+ */
+export async function fortnoxDownload(
+  endpoint: string,
+  params?: Record<string, string | number | boolean | undefined>
+): Promise<DownloadedFile> {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await sendWithRetry<ArrayBuffer>({
+      method: "GET",
+      url: `${FORTNOX_API_BASE_URL}${endpoint}`,
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Accept": "*/*"
+      },
+      timeout: 60000,
+      params: cleanQueryParams(params),
+      responseType: "arraybuffer"
+    });
+    const contentType = response.headers["content-type"];
+    return {
+      data: Buffer.from(response.data),
+      contentType: typeof contentType === "string" ? contentType : null,
+      fileName: fileNameFromContentDisposition(response.headers["content-disposition"])
+    };
+  } catch (error) {
+    // Error bodies arrive as bytes with responseType arraybuffer; decode them for handleApiError
+    if (error instanceof AxiosError && error.response?.data instanceof ArrayBuffer) {
+      try {
+        error.response.data = JSON.parse(Buffer.from(error.response.data).toString("utf8"));
+      } catch {
+        // leave the body as-is
+      }
+    }
+    throw handleApiError(error, endpoint);
+  }
+}
+
+/**
  * Handle API errors with descriptive messages
  */
 export function handleApiError(error: unknown, context?: string): Error {
