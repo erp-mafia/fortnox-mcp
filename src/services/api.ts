@@ -10,7 +10,8 @@ import {
   MAX_FETCH_ALL_RESULTS,
   MAX_FETCH_ALL_PAGES,
   FETCH_ALL_PAGE_SIZE,
-  FETCH_ALL_DELAY_MS
+  FETCH_ALL_DELAY_MS,
+  FORTNOX_MISSING_SCOPE_CODE
 } from "../constants.js";
 
 function sleep(ms: number): Promise<void> {
@@ -165,6 +166,16 @@ export function handleApiError(error: unknown, context?: string): Error {
       data?.ErrorInformation?.Message ||
       data?.message ||
       data?.error;
+
+    // Fortnox reports a scope the token wasn't granted as 400 with this code, not 403
+    const fortnoxCode = Number(data?.ErrorInformation?.code ?? data?.ErrorInformation?.Code);
+    if (fortnoxCode === FORTNOX_MISSING_SCOPE_CODE) {
+      return new Error(
+        `${prefix}Missing OAuth scope: ${fortnoxError || "the access token lacks the scope for this resource"}. ` +
+        `Enable the required scope for the app in the Fortnox developer portal and re-authorize ` +
+        `(existing tokens keep the scopes they were issued with).`
+      );
+    }
 
     switch (status) {
       case 400:

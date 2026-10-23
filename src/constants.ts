@@ -9,6 +9,9 @@ export const RATE_LIMIT_WINDOW_MS = 5000;
 export const RATE_LIMIT_MAX_RETRIES = 5;
 export const RATE_LIMIT_RETRY_BASE_MS = 1000;
 
+// Fortnox error code for "Har inte behörighet för scope" (token lacks a scope)
+export const FORTNOX_MISSING_SCOPE_CODE = 2000663;
+
 // Response limits
 export const CHARACTER_LIMIT = 25000;
 export const DEFAULT_PAGE_SIZE = 20;
