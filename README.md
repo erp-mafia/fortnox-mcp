@@ -113,6 +113,7 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 ### Supplier Invoice Management
 - `fortnox_list_supplier_invoices` - List supplier invoices with filtering
 - `fortnox_get_supplier_invoice` - Get supplier invoice details
+- `fortnox_get_supplier_invoice_files` - Download a supplier invoice's attached files (e.g. the PDF) and extract their text
 - `fortnox_approve_supplier_invoice` - Approve supplier invoice for payment
 - `fortnox_payables_report` - Get accounts payable aging report
 
@@ -212,7 +213,7 @@ npm run build
 
 1. Register as a developer at [Fortnox Developer Portal](https://developer.fortnox.se)
 2. Create a new application to get your **Client ID** and **Client Secret**
-3. Make sure the following **scopes** are enabled for your app: `companyinformation`, `customer`, `invoice`, `supplier`, `supplierinvoice`, `bookkeeping`
+3. Make sure the following **scopes** are enabled for your app: `companyinformation`, `customer`, `invoice`, `supplier`, `supplierinvoice`, `bookkeeping`, `connectfile`, `archive`
 4. Set your redirect URI to `http://localhost:8888/callback` in your Fortnox app settings
 5. Run the token helper script:
 

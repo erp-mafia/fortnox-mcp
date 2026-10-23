@@ -1,5 +1,8 @@
+import { mkdirSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { basename, join, resolve } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { fortnoxRequest, fetchAllPages } from "../services/api.js";
+import { fortnoxRequest, fortnoxDownload, fetchAllPages } from "../services/api.js";
 import { ResponseFormat } from "../constants.js";
 import {
   buildToolResponse,
@@ -20,12 +23,15 @@ import {
   GetSupplierInvoiceSchema,
   ApproveSupplierInvoiceSchema,
   PayablesReportSchema,
+  GetSupplierInvoiceFilesSchema,
+  type GetSupplierInvoiceFilesInput,
   type ListSupplierInvoicesInput,
   type GetSupplierInvoiceInput,
   type ApproveSupplierInvoiceInput,
   type PayablesReportInput
 } from "../schemas/supplierInvoices.js";
 import { normalizeSupplierInvoice, getSupplierInvoiceStatus } from "../services/supplierInvoices.js";
+import { extractFileText } from "../services/fileText.js";
 
 // API response types
 interface FortnoxSupplierInvoiceRow {
@@ -86,6 +92,24 @@ interface SupplierInvoiceListResponse {
 
 interface SupplierInvoiceResponse {
   SupplierInvoice: FortnoxSupplierInvoice;
+}
+
+interface FortnoxSupplierInvoiceFileConnection {
+  FileId: string;
+  Name?: string;
+  SupplierInvoiceNumber: string;
+  SupplierName?: string;
+  "@url"?: string;
+}
+
+interface SupplierInvoiceFileConnectionListResponse {
+  SupplierInvoiceFileConnections: FortnoxSupplierInvoiceFileConnection[];
+}
+
+/** Keep a Fortnox-supplied file name safe to use inside the output directory */
+function safeFileName(name: string, fallback: string): string {
+  const cleaned = basename(name).replace(/[\x00-\x1f<>:"/\\|?*]/g, "_").trim();
+  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
 }
 
 /**
@@ -391,6 +415,147 @@ Returns:
             lines.push("", "## Comments", invoice.Comments);
           }
 
+          textContent = lines.join("\n");
+        }
+
+        return buildToolResponse(textContent, output);
+      } catch (error) {
+        return buildErrorResponse(error);
+      }
+    }
+  );
+
+  // Get supplier invoice attachments (read-only)
+  server.registerTool(
+    "fortnox_get_supplier_invoice_files",
+    {
+      title: "Get Supplier Invoice Files",
+      description: `List the files attached to a supplier invoice (usually the supplier's PDF), download them and return their text.
+
+Use this when the accounting rows from fortnox_get_supplier_invoice are not enough, e.g. to see
+article lines, quantities or unit prices that are only on the original invoice document.
+
+Requires the Fortnox OAuth scopes 'connectfile' (file connections) and 'archive' (file download).
+
+Args:
+  - given_number (string): Supplier invoice given number (required)
+  - download (boolean): Download and save the files locally (default: true; local mode only)
+  - output_dir (string): Where to save files (default: ~/.fortnox-mcp/attachments/supplier-invoice-<given_number>)
+  - extract_text (boolean): Return extracted text from PDF/text files (default: true)
+  - max_text_chars (number): Max characters of text per file (default: 20000)
+  - response_format ('markdown' | 'json'): Output format
+
+Returns:
+  Each attached file with its Fortnox file ID, name, saved path, and extracted text where possible.`,
+      inputSchema: GetSupplierInvoiceFilesSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params: GetSupplierInvoiceFilesInput) => {
+      try {
+        const response = await fortnoxRequest<SupplierInvoiceFileConnectionListResponse>(
+          "/3/supplierinvoicefileconnections",
+          "GET",
+          undefined,
+          { supplierinvoicenumber: params.given_number }
+        );
+        // Filter client-side as well, in case the API ignores the query parameter
+        const connections = (response.SupplierInvoiceFileConnections || [])
+          .filter((c) => String(c.SupplierInvoiceNumber) === params.given_number);
+
+        // Saving to disk only makes sense when the server runs on the user's machine
+        const canSave = process.env.AUTH_MODE !== "remote";
+        const shouldDownload = params.download || params.extract_text;
+        const outputDir = resolve(
+          params.output_dir || join(homedir(), ".fortnox-mcp", "attachments", `supplier-invoice-${safeFileName(params.given_number, "unknown")}`)
+        );
+
+        const files = [];
+        for (const connection of connections) {
+          const file: {
+            file_id: string;
+            name: string | null;
+            content_type: string | null;
+            size_bytes: number | null;
+            saved_path: string | null;
+            text: string | null;
+            text_truncated: boolean;
+            note: string | null;
+          } = {
+            file_id: connection.FileId,
+            name: connection.Name || null,
+            content_type: null,
+            size_bytes: null,
+            saved_path: null,
+            text: null,
+            text_truncated: false,
+            note: null
+          };
+
+          if (shouldDownload) {
+            try {
+              const downloaded = await fortnoxDownload(`/3/archive/${encodeURIComponent(connection.FileId)}`);
+              file.content_type = downloaded.contentType;
+              file.size_bytes = downloaded.data.length;
+              const fileName = safeFileName(connection.Name || downloaded.fileName || "", `${connection.FileId}`);
+              file.name = file.name || fileName;
+
+              if (params.download && canSave) {
+                mkdirSync(outputDir, { recursive: true });
+                const savedPath = join(outputDir, fileName);
+                writeFileSync(savedPath, downloaded.data);
+                file.saved_path = savedPath;
+              }
+
+              if (params.extract_text) {
+                const extracted = await extractFileText(downloaded.data, downloaded.contentType, fileName);
+                if (extracted.text !== null) {
+                  file.text_truncated = extracted.text.length > params.max_text_chars;
+                  file.text = extracted.text.slice(0, params.max_text_chars);
+                }
+                file.note = extracted.note;
+              }
+            } catch (error) {
+              file.note = `Download failed: ${error instanceof Error ? error.message : String(error)}`;
+            }
+          }
+
+          files.push(file);
+        }
+
+        const output = {
+          given_number: params.given_number,
+          supplier_name: connections[0]?.SupplierName || null,
+          file_count: files.length,
+          output_dir: params.download && canSave && files.some((f) => f.saved_path) ? outputDir : null,
+          files
+        };
+
+        let textContent: string;
+        if (params.response_format === ResponseFormat.JSON) {
+          textContent = JSON.stringify(output, null, 2);
+        } else if (files.length === 0) {
+          textContent = `# Supplier Invoice #${params.given_number} Files\n\nNo files are attached to this supplier invoice.`;
+        } else {
+          const lines = [`# Supplier Invoice #${params.given_number} Files`, ""];
+          if (output.supplier_name) lines.push(`**Supplier**: ${output.supplier_name}`, "");
+          for (const f of files) {
+            lines.push(`## ${f.name || f.file_id}`);
+            lines.push(`- **File ID**: ${f.file_id}`);
+            if (f.content_type) lines.push(`- **Type**: ${f.content_type}`);
+            if (f.size_bytes !== null) lines.push(`- **Size**: ${f.size_bytes} bytes`);
+            if (f.saved_path) lines.push(`- **Saved to**: ${f.saved_path}`);
+            if (f.note) lines.push(`- **Note**: ${f.note}`);
+            if (f.text) {
+              lines.push("", "```", f.text, "```");
+              if (f.text_truncated) lines.push(`*Text truncated to ${params.max_text_chars} characters.*`);
+            }
+            lines.push("");
+          }
           textContent = lines.join("\n");
         }
 

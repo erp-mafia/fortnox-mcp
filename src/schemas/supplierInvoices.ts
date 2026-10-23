@@ -127,3 +127,32 @@ export const PayablesReportSchema = z.object({
 }).strict();
 
 export type PayablesReportInput = z.infer<typeof PayablesReportSchema>;
+
+/**
+ * Schema for listing and downloading a supplier invoice's attached files
+ */
+export const GetSupplierInvoiceFilesSchema = z.object({
+  given_number: z.string()
+    .min(1)
+    .describe("The supplier invoice given number whose attachments to fetch"),
+  download: z.boolean()
+    .default(true)
+    .describe("Download the files and save them locally (local mode only). If false, only list them."),
+  output_dir: z.string()
+    .optional()
+    .describe("Directory to save files in (default: ~/.fortnox-mcp/attachments/supplier-invoice-<given_number>)"),
+  extract_text: z.boolean()
+    .default(true)
+    .describe("Return text extracted from PDF and text files, when possible"),
+  max_text_chars: z.number()
+    .int()
+    .min(0)
+    .max(100000)
+    .default(20000)
+    .describe("Maximum characters of extracted text to return per file"),
+  response_format: z.nativeEnum(ResponseFormat)
+    .default(ResponseFormat.MARKDOWN)
+    .describe("Output format: 'markdown' or 'json'")
+}).strict();
+
+export type GetSupplierInvoiceFilesInput = z.infer<typeof GetSupplierInvoiceFilesSchema>;

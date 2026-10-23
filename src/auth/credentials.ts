@@ -55,5 +55,7 @@ export const FORTNOX_SCOPES = [
   "invoice",
   "supplier",
   "supplierinvoice",
-  "bookkeeping"
+  "bookkeeping",
+  "connectfile",
+  "archive"
 ];

@@ -38,6 +38,7 @@
     "axios": "^1.7.9",
     "express": "^4.21.0",
     "jose": "^5.9.6",
+    "unpdf": "^1.9.1",
     "zod": "^3.23.8"
   },
   "optionalDependencies": {
