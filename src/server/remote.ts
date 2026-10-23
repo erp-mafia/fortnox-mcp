@@ -1,5 +1,6 @@
 import express, { Express, Request, Response, NextFunction } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerAllTools } from "../tools/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -10,16 +11,6 @@ import {
   initializeTokenProvider,
 } from "../auth/index.js";
 import { runWithContext } from "../auth/context.js";
-import { registerCustomerTools } from "../tools/customers.js";
-import { registerInvoiceTools } from "../tools/invoices.js";
-import { registerSupplierTools } from "../tools/suppliers.js";
-import { registerSupplierInvoiceTools } from "../tools/supplierInvoices.js";
-import { registerAccountTools } from "../tools/accounts.js";
-import { registerVoucherTools } from "../tools/vouchers.js";
-import { registerCompanyTools } from "../tools/company.js";
-import { registerAnalyticsTools } from "../tools/analytics.js";
-import { registerOrderTools } from "../tools/orders.js";
-import { registerBIAnalyticsTools } from "../tools/biAnalytics.js";
 import { ITokenStorage } from "../auth/storage/types.js";
 
 export interface RemoteServerOptions {
@@ -104,16 +95,7 @@ export function createRemoteServer(options: RemoteServerOptions): Express {
     version: "1.0.0",
   });
 
-  registerCustomerTools(mcpServer);
-  registerInvoiceTools(mcpServer);
-  registerSupplierTools(mcpServer);
-  registerSupplierInvoiceTools(mcpServer);
-  registerAccountTools(mcpServer);
-  registerVoucherTools(mcpServer);
-  registerCompanyTools(mcpServer);
-  registerAnalyticsTools(mcpServer);
-  registerOrderTools(mcpServer);
-  registerBIAnalyticsTools(mcpServer);
+  registerAllTools(mcpServer);
 
   // Protected MCP endpoint
   app.post(
