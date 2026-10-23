@@ -21,6 +21,7 @@
     "release:patch": "./scripts/release.sh patch",
     "release:minor": "./scripts/release.sh minor",
     "release:major": "./scripts/release.sh major",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "get-token": "tsx scripts/get-token.ts"
   },
   "engines": {
