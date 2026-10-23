@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fetchAllPages } from "../services/api.js";
+import { normalizeSupplierInvoice } from "../services/supplierInvoices.js";
 import { ResponseFormat } from "../constants.js";
 import {
   buildToolResponse,
@@ -258,7 +259,7 @@ export function registerBIAnalyticsTools(server: McpServer): void {
           payablesResult = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
             "/3/supplierinvoices",
             { filter: "unpaid" },
-            (r) => r.SupplierInvoices || [],
+            (r) => (r.SupplierInvoices || []).map(normalizeSupplierInvoice),
             (r) => r.MetaInformation?.["@TotalResources"] || 0
           );
         } catch (error) {

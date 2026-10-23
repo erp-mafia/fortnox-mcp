@@ -25,6 +25,7 @@ import {
   type ApproveSupplierInvoiceInput,
   type PayablesReportInput
 } from "../schemas/supplierInvoices.js";
+import { normalizeSupplierInvoice, getSupplierInvoiceStatus } from "../services/supplierInvoices.js";
 
 // API response types
 interface FortnoxSupplierInvoiceRow {
@@ -85,16 +86,6 @@ interface SupplierInvoiceListResponse {
 
 interface SupplierInvoiceResponse {
   SupplierInvoice: FortnoxSupplierInvoice;
-}
-
-/**
- * Get supplier invoice status
- */
-function getSupplierInvoiceStatus(inv: FortnoxSupplierInvoiceListItem): string {
-  if (inv.Cancelled) return "cancelled";
-  if ((inv.Balance || 0) === 0) return "paid";
-  if (!inv.Booked) return "draft";
-  return "unpaid";
 }
 
 /**
@@ -178,7 +169,7 @@ Examples:
           const result = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
             "/3/supplierinvoices",
             queryParams,
-            (r) => r.SupplierInvoices || [],
+            (r) => (r.SupplierInvoices || []).map(normalizeSupplierInvoice),
             (r) => r.MetaInformation?.["@TotalResources"] || 0
           );
           invoices = result.items;
@@ -192,7 +183,7 @@ Examples:
           queryParams.page = params.page;
 
           const response = await fortnoxRequest<SupplierInvoiceListResponse>("/3/supplierinvoices", "GET", undefined, queryParams);
-          invoices = response.SupplierInvoices || [];
+          invoices = (response.SupplierInvoices || []).map(normalizeSupplierInvoice);
           total = response.MetaInformation?.["@TotalResources"] || invoices.length;
         }
 
@@ -326,7 +317,7 @@ Returns:
         const response = await fortnoxRequest<SupplierInvoiceResponse>(
           `/3/supplierinvoices/${encodeURIComponent(params.given_number)}`
         );
-        const invoice = response.SupplierInvoice;
+        const invoice = normalizeSupplierInvoice(response.SupplierInvoice);
 
         const output = {
           given_number: invoice.GivenNumber,
@@ -439,7 +430,7 @@ Returns:
           `/3/supplierinvoices/${encodeURIComponent(params.given_number)}/approvalpayment`,
           "PUT"
         );
-        const invoice = response.SupplierInvoice;
+        const invoice = normalizeSupplierInvoice(response.SupplierInvoice);
 
         const output = {
           success: true,
@@ -522,7 +513,7 @@ Examples:
         const result = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
           "/3/supplierinvoices",
           queryParams,
-          (r) => r.SupplierInvoices || [],
+          (r) => (r.SupplierInvoices || []).map(normalizeSupplierInvoice),
           (r) => r.MetaInformation?.["@TotalResources"] || 0
         );
 
