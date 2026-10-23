@@ -1,44 +1,123 @@
-import axios, { AxiosError, AxiosRequestConfig } from "axios";
+import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import { getTokenProvider } from "../auth/index.js";
 import { getCurrentUserId } from "../auth/context.js";
 import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
   RATE_LIMIT_WINDOW_MS,
+  RATE_LIMIT_MAX_RETRIES,
+  RATE_LIMIT_RETRY_BASE_MS,
   MAX_FETCH_ALL_RESULTS,
   MAX_FETCH_ALL_PAGES,
   FETCH_ALL_PAGE_SIZE,
   FETCH_ALL_DELAY_MS
 } from "../constants.js";
 
-// Rate limiting state
-let requestTimestamps: number[] = [];
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
- * Simple rate limiter for Fortnox API (25 requests per 5 seconds)
+ * Sliding-window rate limiter shared by every request in the process.
+ *
+ * Each caller reserves a start time synchronously before awaiting, so concurrent
+ * callers queue up behind each other instead of all waking at once and bursting
+ * past the limit.
  */
-async function waitForRateLimit(): Promise<void> {
-  const now = Date.now();
+export class RateLimiter {
+  private reservations: number[] = [];
 
-  // Remove timestamps outside the window
-  requestTimestamps = requestTimestamps.filter(
-    (ts) => now - ts < RATE_LIMIT_WINDOW_MS
-  );
+  constructor(
+    private maxRequests: number,
+    private windowMs: number,
+    private bufferMs = 50
+  ) {}
 
-  // If at limit, wait for oldest request to expire
-  if (requestTimestamps.length >= RATE_LIMIT_REQUESTS) {
-    const oldestTimestamp = requestTimestamps[0];
-    const waitTime = RATE_LIMIT_WINDOW_MS - (now - oldestTimestamp) + 50; // +50ms buffer
-    if (waitTime > 0) {
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-    }
-    // Clean up again after waiting
-    requestTimestamps = requestTimestamps.filter(
-      (ts) => Date.now() - ts < RATE_LIMIT_WINDOW_MS
-    );
+  configure(maxRequests: number, windowMs: number, bufferMs = this.bufferMs): void {
+    this.maxRequests = maxRequests;
+    this.windowMs = windowMs;
+    this.bufferMs = bufferMs;
+    this.reservations = [];
   }
 
-  requestTimestamps.push(Date.now());
+  async acquire(): Promise<void> {
+    const now = Date.now();
+    // Keep reservations still inside the window, including future ones
+    this.reservations = this.reservations.filter((t) => t > now - this.windowMs);
+
+    let start = now;
+    if (this.reservations.length >= this.maxRequests) {
+      const blocking = this.reservations[this.reservations.length - this.maxRequests];
+      start = blocking + this.windowMs + this.bufferMs;
+    }
+    const last = this.reservations[this.reservations.length - 1];
+    if (last !== undefined && start < last) start = last;
+
+    this.reservations.push(start);
+    if (start > now) {
+      await sleep(start - now);
+    }
+  }
+}
+
+/** Fortnox allows 25 requests per 5 seconds per access token */
+export const apiRateLimiter = new RateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_MS);
+
+/** Retry settings for HTTP 429 responses (mutable so tests can shorten the delays) */
+export const rateLimitRetryConfig = {
+  maxRetries: RATE_LIMIT_MAX_RETRIES,
+  baseDelayMs: RATE_LIMIT_RETRY_BASE_MS
+};
+
+function retryDelayMs(error: AxiosError, attempt: number): number {
+  const retryAfter = Number(error.response?.headers?.["retry-after"]);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return retryAfter * 1000;
+  }
+  const backoff = rateLimitRetryConfig.baseDelayMs * 2 ** attempt;
+  return backoff + Math.random() * rateLimitRetryConfig.baseDelayMs;
+}
+
+/**
+ * Send a request through the shared rate limiter, retrying with backoff on HTTP 429.
+ * The limiter only sees this process; other processes using the same token (e.g. a
+ * second MCP client) share Fortnox's budget, so 429s can still happen and are retried.
+ */
+async function sendWithRetry<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  for (let attempt = 0; ; attempt++) {
+    await apiRateLimiter.acquire();
+    try {
+      return await axios<T>(config);
+    } catch (error) {
+      const isRateLimited = error instanceof AxiosError && error.response?.status === 429;
+      if (!isRateLimited || attempt >= rateLimitRetryConfig.maxRetries) {
+        throw error;
+      }
+      await sleep(retryDelayMs(error, attempt));
+    }
+  }
+}
+
+function cleanQueryParams(
+  params?: Record<string, string | number | boolean | undefined>
+): Record<string, string | number | boolean> | undefined {
+  const cleanParams: Record<string, string | number | boolean> = {};
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        cleanParams[key] = value;
+      }
+    }
+  }
+  return Object.keys(cleanParams).length > 0 ? cleanParams : undefined;
+}
+
+async function getAccessToken(): Promise<string> {
+  // In local mode, userId is undefined and ignored
+  // In remote mode, userId comes from the request context
+  const tokenProvider = getTokenProvider();
+  const userId = getCurrentUserId();
+  return tokenProvider.getAccessToken(userId);
 }
 
 /**
@@ -51,40 +130,20 @@ export async function fortnoxRequest<T>(
   data?: unknown,
   params?: Record<string, string | number | boolean | undefined>
 ): Promise<T> {
-  await waitForRateLimit();
-
-  // Get access token using the token provider
-  // In local mode, userId is undefined and ignored
-  // In remote mode, userId comes from the request context
-  const tokenProvider = getTokenProvider();
-  const userId = getCurrentUserId();
-  const accessToken = await tokenProvider.getAccessToken(userId);
-
-  // Clean undefined params
-  const cleanParams: Record<string, string | number | boolean> = {};
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) {
-        cleanParams[key] = value;
-      }
-    }
-  }
-
-  const config: AxiosRequestConfig = {
-    method,
-    url: `${FORTNOX_API_BASE_URL}${endpoint}`,
-    headers: {
-      "Authorization": `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    timeout: 30000,
-    params: Object.keys(cleanParams).length > 0 ? cleanParams : undefined,
-    data
-  };
-
   try {
-    const response = await axios(config);
+    const accessToken = await getAccessToken();
+    const response = await sendWithRetry<T>({
+      method,
+      url: `${FORTNOX_API_BASE_URL}${endpoint}`,
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      timeout: 30000,
+      params: cleanQueryParams(params),
+      data
+    });
     return response.data;
   } catch (error) {
     throw handleApiError(error, endpoint);
@@ -209,13 +268,6 @@ export interface FetchAllResult<T> {
 }
 
 /**
- * Delay execution for specified milliseconds
- */
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
  * Fetch all pages of a paginated Fortnox API endpoint
  *
  * This function automatically paginates through all results from a Fortnox endpoint.
@@ -292,7 +344,7 @@ export async function fetchAllPages<T, R>(
         page++;
         // Delay to respect rate limits (except on last page)
         if (hasMore) {
-          await delay(delayMs);
+          await sleep(delayMs);
         }
       }
     }
