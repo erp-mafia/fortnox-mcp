@@ -92,6 +92,9 @@ export const GetVoucherSchema = z.object({
     .int()
     .optional()
     .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
+  include_removed_rows: z.boolean()
+    .default(false)
+    .describe("Count removed (struck-out correction) rows in the totals. Removed rows are always listed and flagged."),
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")
@@ -234,6 +237,9 @@ export const SearchVouchersSchema = z.object({
   include_rows: z.boolean()
     .default(false)
     .describe("Include full voucher row details in results"),
+  include_removed_rows: z.boolean()
+    .default(false)
+    .describe("With include_rows, also return removed (struck-out correction) rows. Off by default."),
   max_vouchers: z.number()
     .int()
     .min(10)
