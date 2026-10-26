@@ -15,6 +15,11 @@ export interface ITokenProvider {
 export interface RequestContext {
   userId?: string;
   sessionId?: string;
+  /** The company profile a tool call runs against (multi-company local mode) */
+  company?: {
+    profile: string;
+    tokenProvider: ITokenProvider;
+  };
 }
 
 export class AuthRequiredError extends Error {

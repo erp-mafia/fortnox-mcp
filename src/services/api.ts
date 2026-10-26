@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import { getTokenProvider } from "../auth/index.js";
-import { getCurrentUserId } from "../auth/context.js";
+import { getRequestContext } from "../auth/context.js";
 import {
   FORTNOX_API_BASE_URL,
   RATE_LIMIT_REQUESTS,
@@ -64,6 +64,30 @@ export class RateLimiter {
 /** Fortnox allows 25 requests per 5 seconds per access token */
 export const apiRateLimiter = new RateLimiter(RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW_MS);
 
+/** Each company has its own Fortnox budget, so each profile gets its own limiter */
+const companyRateLimiters = new Map<string, RateLimiter>();
+const rateLimiterSettings = { maxRequests: RATE_LIMIT_REQUESTS, windowMs: RATE_LIMIT_WINDOW_MS, bufferMs: 50 };
+
+/** Reconfigure every rate limiter, including those for profiles created later (used by tests) */
+export function configureRateLimiters(maxRequests: number, windowMs: number, bufferMs = 50): void {
+  Object.assign(rateLimiterSettings, { maxRequests, windowMs, bufferMs });
+  apiRateLimiter.configure(maxRequests, windowMs, bufferMs);
+  for (const limiter of companyRateLimiters.values()) {
+    limiter.configure(maxRequests, windowMs, bufferMs);
+  }
+}
+
+function currentRateLimiter(): RateLimiter {
+  const profile = getRequestContext()?.company?.profile;
+  if (!profile) return apiRateLimiter;
+  let limiter = companyRateLimiters.get(profile);
+  if (!limiter) {
+    limiter = new RateLimiter(rateLimiterSettings.maxRequests, rateLimiterSettings.windowMs, rateLimiterSettings.bufferMs);
+    companyRateLimiters.set(profile, limiter);
+  }
+  return limiter;
+}
+
 /** Retry settings for HTTP 429 responses (mutable so tests can shorten the delays) */
 export const rateLimitRetryConfig = {
   maxRetries: RATE_LIMIT_MAX_RETRIES,
@@ -86,7 +110,7 @@ function retryDelayMs(error: AxiosError, attempt: number): number {
  */
 async function sendWithRetry<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
   for (let attempt = 0; ; attempt++) {
-    await apiRateLimiter.acquire();
+    await currentRateLimiter().acquire();
     try {
       return await axios<T>(config);
     } catch (error) {
@@ -114,11 +138,14 @@ function cleanQueryParams(
 }
 
 async function getAccessToken(): Promise<string> {
+  const context = getRequestContext();
+  // Multi-company local mode: the tool call names the company profile
+  if (context?.company) {
+    return context.company.tokenProvider.getAccessToken();
+  }
   // In local mode, userId is undefined and ignored
   // In remote mode, userId comes from the request context
-  const tokenProvider = getTokenProvider();
-  const userId = getCurrentUserId();
-  return tokenProvider.getAccessToken(userId);
+  return getTokenProvider().getAccessToken(context?.userId);
 }
 
 /**
