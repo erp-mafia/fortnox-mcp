@@ -118,3 +118,55 @@ describe("fortnox_get_supplier_invoice_files paging (item 2)", () => {
     assert.ok(out.files[0].next_text_offset > 0);
   });
 });
+
+describe("unbooked supplier invoices (item 3)", () => {
+  // 250 invoices across 3 pages; Booked=false on a few waiting for approval and a few cancelled.
+  // Like Fortnox, filter=unbooked returns neither kind, and authorizepending returns the former.
+  const awaitingApproval = new Set(["1010", "1150", "1240"]);
+  const cancelledUnbooked = new Set(["1020", "1199"]);
+  const all = Array.from({ length: 250 }, (_, i) => {
+    const n = String(1000 + i);
+    const unbooked = awaitingApproval.has(n) || cancelledUnbooked.has(n);
+    return { ...supplierInvoiceListItem(n, unbooked ? "100" : "0", "100", !unbooked), Cancel: cancelledUnbooked.has(n) };
+  });
+
+  before(() => {
+    installFakeFortnox([
+      (req) => {
+        if (req.path !== "/3/supplierinvoices") return undefined;
+        const filtered = req.params.filter === "unbooked"
+          ? []
+          : req.params.filter === "authorizepending"
+            ? all.filter((i) => awaitingApproval.has(i.GivenNumber))
+            : all;
+        const limit = Number(req.params.limit ?? 100);
+        const page = Number(req.params.page ?? 1);
+        return json({
+          SupplierInvoices: filtered.slice((page - 1) * limit, page * limit),
+          MetaInformation: { "@TotalResources": filtered.length, "@TotalPages": Math.ceil(filtered.length / limit), "@CurrentPage": page }
+        });
+      }
+    ]);
+  });
+
+  test("booked=false returns every unbooked invoice from all pages", async () => {
+    const out = await callToolJson(client, "fortnox_list_supplier_invoices", { booked: false });
+    const numbers = out.invoices.map((i: any) => i.given_number).sort();
+    assert.deepEqual(numbers, [...awaitingApproval, ...cancelledUnbooked].sort());
+    assert.ok(out.pages_fetched >= 3, "reads past the first page");
+    assert.ok(out.invoices.every((i: any) => i.booked === false));
+    const statuses = Object.fromEntries(out.invoices.map((i: any) => [i.given_number, i.status]));
+    assert.equal(statuses["1020"], "cancelled");
+    assert.equal(statuses["1010"], "draft");
+  });
+
+  test("booked=false combines with a Fortnox filter", async () => {
+    const out = await callToolJson(client, "fortnox_list_supplier_invoices", { filter: "authorizepending", booked: false });
+    assert.deepEqual(out.invoices.map((i: any) => i.given_number).sort(), [...awaitingApproval].sort());
+  });
+
+  test("filter=unbooked is passed to Fortnox as is", async () => {
+    const out = await callToolJson(client, "fortnox_list_supplier_invoices", { filter: "unbooked" });
+    assert.equal(out.invoices.length, 0);
+  });
+});

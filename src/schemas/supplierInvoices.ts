@@ -27,7 +27,7 @@ export const ListSupplierInvoicesSchema = z.object({
     "authorizepending"
   ])
     .optional()
-    .describe("Filter supplier invoices by status"),
+    .describe("Filter supplier invoices by status (applied by Fortnox). Note: Fortnox's 'unbooked' leaves out cancelled invoices and invoices waiting for approval ('authorizepending'); use booked=false to get every invoice that is not booked."),
   supplier_number: z.string()
     .max(50)
     .optional()
@@ -60,6 +60,9 @@ export const ListSupplierInvoicesSchema = z.object({
   fetch_all: z.boolean()
     .default(false)
     .describe("Fetch all results by auto-paginating through all pages. WARNING: May take time for large datasets (max 10,000 results)."),
+  booked: z.boolean()
+    .optional()
+    .describe("Client-side filter on the Booked flag. booked=false returns every unbooked invoice, including ones waiting for approval and cancelled ones (status 'cancelled'). Reads all pages (like fetch_all) because the filter is applied after fetching."),
   min_amount: z.number()
     .min(0)
     .optional()

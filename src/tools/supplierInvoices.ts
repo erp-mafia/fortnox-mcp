@@ -128,7 +128,8 @@ Retrieves a paginated list of supplier invoices with optional filtering by statu
 Args:
   - limit (number): Max results per page, 1-100 (default: 20)
   - page (number): Page number for pagination (default: 1)
-  - filter ('cancelled' | 'fullypaid' | 'unpaid' | 'unpaidoverdue' | 'unbooked' | 'pendingpayment' | 'authorizepending'): Filter by invoice status ('authorizepending' = waiting for approval/attest)
+  - filter ('cancelled' | 'fullypaid' | 'unpaid' | 'unpaidoverdue' | 'unbooked' | 'pendingpayment' | 'authorizepending'): Filter by invoice status, applied by Fortnox ('authorizepending' = waiting for approval/attest). Fortnox's 'unbooked' leaves out cancelled invoices and invoices waiting for approval
+  - booked (boolean): Client-side filter on the Booked flag; booked=false returns every unbooked invoice (reads all pages)
   - supplier_number (string): Filter by supplier number
   - from_date (string): Filter invoices from this date (YYYY-MM-DD)
   - to_date (string): Filter invoices to this date (YYYY-MM-DD)
@@ -148,7 +149,8 @@ Returns:
 Examples:
   - List unpaid supplier invoices: filter="unpaid"
   - Last month's supplier invoices: period="last_month"
-  - Supplier invoices this year: supplier_number="1", period="this_year"`,
+  - Supplier invoices this year: supplier_number="1", period="this_year"
+  - Every invoice that is not booked yet: booked=false`,
       inputSchema: ListSupplierInvoicesSchema,
       annotations: {
         readOnlyHint: true,
@@ -187,8 +189,10 @@ Examples:
         let pagesFetched = 1;
         let truncated = false;
         let truncationReason: string | undefined;
+        // A client-side Booked filter on one page would miss matches on other pages
+        const fetchAll = params.fetch_all || params.booked !== undefined;
 
-        if (params.fetch_all) {
+        if (fetchAll) {
           // Use fetchAllPages for complete dataset
           const result = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
             "/3/supplierinvoices",
@@ -211,7 +215,10 @@ Examples:
           total = response.MetaInformation?.["@TotalResources"] || invoices.length;
         }
 
-        // Apply client-side amount filters
+        // Apply client-side filters
+        if (params.booked !== undefined) {
+          invoices = invoices.filter(inv => (inv.Booked ?? false) === params.booked);
+        }
         if (params.min_amount !== undefined) {
           invoices = invoices.filter(inv => (inv.Total || 0) >= params.min_amount!);
         }
@@ -220,7 +227,7 @@ Examples:
         }
 
         // Build pagination metadata
-        const paginationMeta = params.fetch_all
+        const paginationMeta = fetchAll
           ? {
               total,
               count: invoices.length,
@@ -261,7 +268,7 @@ Examples:
             ? `Supplier Invoices - ${getPeriodDescription(params.period)}`
             : "Supplier Invoices";
 
-          if (params.fetch_all) {
+          if (fetchAll) {
             const lines: string[] = [
               `# ${title}`,
               "",
