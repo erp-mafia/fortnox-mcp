@@ -8,13 +8,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { initializeTokenProvider } from "../src/auth/index.js";
-import { apiRateLimiter, rateLimitRetryConfig } from "../src/services/api.js";
+import { configureRateLimiters, rateLimitRetryConfig } from "../src/services/api.js";
 import { registerAllTools } from "../src/tools/index.js";
+import type { CompanyRegistry } from "../src/auth/companies.js";
 
 export interface FakeRequest {
   method: string;
   path: string;
   params: Record<string, string>;
+  /** The Authorization header, to tell which token a request used */
+  authorization: string | null;
+  /** Request body as sent (form bodies are URLSearchParams) */
+  body: unknown;
 }
 
 export interface FakeResponse {
@@ -39,7 +44,14 @@ export function installFakeFortnox(routes: Route[]): FakeFortnox {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) params[key] = String(value);
     }
-    const req: FakeRequest = { method: (config.method ?? "get").toUpperCase(), path: url.pathname, params };
+    const authorization = config.headers?.Authorization ?? config.headers?.authorization;
+    const req: FakeRequest = {
+      method: (config.method ?? "get").toUpperCase(),
+      path: url.pathname,
+      params,
+      authorization: typeof authorization === "string" ? authorization : null,
+      body: config.data
+    };
     requests.push(req);
 
     let res: FakeResponse | undefined;
@@ -70,18 +82,18 @@ export function json(data: unknown): FakeResponse {
 }
 
 /** Start an in-memory MCP client connected to a server with all tools registered */
-export async function startClient(): Promise<Client> {
+export async function startClient(options: { companies?: CompanyRegistry } = {}): Promise<Client> {
   initializeTokenProvider({
     getAccessToken: async () => "test-access-token",
     isAuthenticated: () => true,
     getTokenInfo: () => null
   });
   // Keep tests fast: no client-side throttling, near-instant 429 backoff
-  apiRateLimiter.configure(10_000, 1000, 0);
+  configureRateLimiters(10_000, 1000, 0);
   rateLimitRetryConfig.baseDelayMs = 1;
 
   const server = new McpServer({ name: "fortnox-mcp-test", version: "0.0.0" });
-  registerAllTools(server);
+  registerAllTools(server, options.companies);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: "test-client", version: "0.0.0" });
