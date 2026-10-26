@@ -113,7 +113,7 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 ### Supplier Invoice Management
 - `fortnox_list_supplier_invoices` - List supplier invoices with filtering
 - `fortnox_get_supplier_invoice` - Get supplier invoice details
-- `fortnox_get_supplier_invoice_files` - Download a supplier invoice's attached files (e.g. the PDF) and extract their text
+- `fortnox_get_supplier_invoice_files` - Download a supplier invoice's attached files (e.g. the PDF) and extract their text. Duplicate copies (ORIGINAL/DUPLICATE/TRIPLICATE) and repeated headers/footers are removed; long text is returned in pages (pass `next_text_offset` back as `text_offset`)
 - `fortnox_approve_supplier_invoice` - Approve supplier invoice for payment
 - `fortnox_payables_report` - Get accounts payable aging report
 

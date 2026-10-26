@@ -179,3 +179,49 @@ export async function extractFileText(
   }
   return result(null, `Text extraction is not supported for this file type (${contentType ?? "unknown"}).`);
 }
+
+export interface TextSlice {
+  text: string;
+  /** Offset to pass as text_offset to continue, or null when the text is complete */
+  nextOffset: number | null;
+}
+
+/**
+ * Take a slice of `text` starting at `offset` whose JSON-escaped size is at most
+ * `maxChars`, ending at a line break so no row is cut in half. A single line longer
+ * than the budget is cut mid-line as a last resort.
+ */
+export function sliceTextAtLines(text: string, offset: number, maxChars: number): TextSlice {
+  const start = Math.min(Math.max(offset, 0), text.length);
+  if (maxChars <= 0) {
+    return { text: "", nextOffset: start < text.length ? start : null };
+  }
+  // Size as it will appear inside a JSON string (newlines and quotes are escaped)
+  const jsonSize = (s: string) => JSON.stringify(s).length - 2;
+
+  let end = start;
+  let used = 0;
+  while (end < text.length) {
+    const lineBreak = text.indexOf("\n", end);
+    const lineEnd = lineBreak === -1 ? text.length : lineBreak + 1;
+    const size = jsonSize(text.slice(end, lineEnd));
+    if (used + size > maxChars) break;
+    used += size;
+    end = lineEnd;
+  }
+
+  if (end === start && start < text.length) {
+    // The next line alone is over budget: cut it, measuring the escaped size per character
+    let cut = start;
+    while (cut < text.length && used + jsonSize(text[cut]) <= maxChars) {
+      used += jsonSize(text[cut]);
+      cut++;
+    }
+    end = Math.max(cut, start + 1);
+  }
+
+  return {
+    text: text.slice(start, end),
+    nextOffset: end < text.length ? end : null
+  };
+}

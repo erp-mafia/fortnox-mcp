@@ -14,6 +14,10 @@ export const FORTNOX_MISSING_SCOPE_CODE = 2000663;
 
 // Response limits
 export const CHARACTER_LIMIT = 25000;
+// Extracted file text per response (all files combined, measured as JSON-escaped
+// characters). Leaves room within CHARACTER_LIMIT for the JSON structure and metadata.
+export const MAX_FILE_TEXT_CHARS = 18000;
+export const DEFAULT_FILE_TEXT_CHARS = 15000;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 

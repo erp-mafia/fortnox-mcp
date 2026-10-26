@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { installFakeFortnox, startClient, callToolJson, json, type FakeFortnox } from "./helpers.js";
 import { supplierInvoiceListItem } from "./fixtures.js";
+import { CHARACTER_LIMIT } from "../src/constants.js";
 import { normalizeSupplierInvoice, getSupplierInvoiceStatus } from "../src/services/supplierInvoices.js";
 
 let client: Client;
@@ -69,5 +70,51 @@ describe("supplier invoice status (issue 4)", () => {
   test("status helper handles normalized values", () => {
     assert.equal(getSupplierInvoiceStatus({ Balance: 0, Booked: true }), "paid");
     assert.equal(getSupplierInvoiceStatus({ Balance: 10, Booked: true }), "unpaid");
+  });
+});
+
+describe("fortnox_get_supplier_invoice_files paging (item 2)", () => {
+  const fileText = Array.from({ length: 3000 }, (_, i) => `${(i + 1) * 10} ART-${i} Example item ${i} 1.00 ${i} ${i}.00`).join("\n");
+
+  before(() => {
+    installFakeFortnox([
+      (req) => (req.path === "/3/supplierinvoicefileconnections"
+        ? json({ SupplierInvoiceFileConnections: [
+          { FileId: "file-1", Name: "invoice.txt", SupplierInvoiceNumber: "1003", SupplierName: "Example Labels Lda" }
+        ] })
+        : undefined),
+      (req) => (req.path === "/3/archive/file-1"
+        ? { data: Buffer.from(fileText, "utf8"), headers: { "content-type": "text/plain" } }
+        : undefined)
+    ]);
+  });
+
+  test("text_offset and next_text_offset page through the whole text", async () => {
+    const parts: string[] = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const out = await callToolJson(client, "fortnox_get_supplier_invoice_files", {
+        given_number: "1003", file_id: "file-1", download: false, max_text_chars: 5000, text_offset: offset
+      });
+      const file = out.files[0];
+      assert.equal(file.text_offset, offset);
+      assert.equal(file.text_length, fileText.length);
+      if (file.next_text_offset !== null) assert.ok(file.text.endsWith("\n"));
+      parts.push(file.text);
+      offset = file.next_text_offset;
+    }
+    assert.ok(parts.length > 1);
+    assert.equal(parts.join(""), fileText);
+  });
+
+  test("the default response stays within the character limit", async () => {
+    const result = await client.callTool({
+      name: "fortnox_get_supplier_invoice_files",
+      arguments: { given_number: "1003", download: false, response_format: "json" }
+    });
+    const text = (result.content as Array<{ text: string }>)[0].text;
+    assert.ok(text.length <= CHARACTER_LIMIT, `${text.length} characters`);
+    const out = JSON.parse(text);
+    assert.ok(out.files[0].next_text_offset > 0);
   });
 });

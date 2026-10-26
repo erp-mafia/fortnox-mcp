@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ResponseFormat, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../constants.js";
+import { ResponseFormat, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_FILE_TEXT_CHARS, DEFAULT_FILE_TEXT_CHARS } from "../constants.js";
 import { DatePeriodEnum } from "./invoices.js";
 
 /**
@@ -152,10 +152,18 @@ export const GetSupplierInvoiceFilesSchema = z.object({
     .describe("Keep only the first occurrence of header/footer lines that appear once on at least 80% of pages (PDFs with 3+ pages after deduplication). Line items are never removed."),
   max_text_chars: z.number()
     .int()
+    .min(500)
+    .max(MAX_FILE_TEXT_CHARS)
+    .default(DEFAULT_FILE_TEXT_CHARS)
+    .describe(`Maximum characters of extracted text in this response, all files combined (500-${MAX_FILE_TEXT_CHARS}). Text is cut at a line break; use next_text_offset to read on.`),
+  text_offset: z.number()
+    .int()
     .min(0)
-    .max(100000)
-    .default(20000)
-    .describe("Maximum characters of extracted text to return per file"),
+    .default(0)
+    .describe("Character offset to start the text from, for reading on after a cut. Pass the next_text_offset from the previous response (applies to every returned file; use file_id to page through one file)."),
+  file_id: z.string()
+    .optional()
+    .describe("Only return this attached file (its Fortnox file ID), e.g. when paging through one file's text"),
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")

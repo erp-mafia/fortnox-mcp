@@ -31,7 +31,7 @@ import {
   type PayablesReportInput
 } from "../schemas/supplierInvoices.js";
 import { normalizeSupplierInvoice, getSupplierInvoiceStatus } from "../services/supplierInvoices.js";
-import { extractFileText } from "../services/fileText.js";
+import { extractFileText, sliceTextAtLines } from "../services/fileText.js";
 
 // API response types
 interface FortnoxSupplierInvoiceRow {
@@ -444,13 +444,17 @@ Args:
   - extract_text (boolean): Return extracted text from PDF/text files (default: true)
   - dedupe_pages (boolean): Drop PDF pages that repeat an earlier page, e.g. DUPLICATE/TRIPLICATE copies (default: true)
   - strip_repeated_lines (boolean): Keep only the first occurrence of header/footer lines repeated on almost every page (default: true)
-  - max_text_chars (number): Max characters of text per file (default: 20000)
+  - max_text_chars (number): Max characters of text in this response, all files combined (default: 15000, max: 18000)
+  - text_offset (number): Start the text at this offset; pass next_text_offset from the previous call (default: 0)
+  - file_id (string): Only return this attached file, e.g. to page through one file's text
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
   Each attached file with its Fortnox file ID, name, saved path, and extracted text where possible.
   PDF text is marked with "--- Page N ---" (original page numbers) and reports pages_total,
-  pages_kept, duplicate_pages_removed and repeated_lines_removed. Line items are never removed.`,
+  pages_kept, duplicate_pages_removed and repeated_lines_removed. Line items are never removed.
+  Long text is cut at a line break. When a file's text continues, next_text_offset is set:
+  call again with text_offset=<next_text_offset> (and file_id) to read the rest.`,
       inputSchema: GetSupplierInvoiceFilesSchema,
       annotations: {
         readOnlyHint: true,
@@ -469,7 +473,10 @@ Returns:
         );
         // Filter client-side as well, in case the API ignores the query parameter
         const connections = (response.SupplierInvoiceFileConnections || [])
-          .filter((c) => String(c.SupplierInvoiceNumber) === params.given_number);
+          .filter((c) => String(c.SupplierInvoiceNumber) === params.given_number)
+          .filter((c) => params.file_id === undefined || c.FileId === params.file_id);
+        // Text budget shared by all files so the whole response stays within the size limit
+        let textBudget = params.max_text_chars;
 
         // Saving to disk only makes sense when the server runs on the user's machine
         const canSave = process.env.AUTH_MODE !== "remote";
@@ -487,6 +494,9 @@ Returns:
             size_bytes: number | null;
             saved_path: string | null;
             text: string | null;
+            text_offset: number | null;
+            text_length: number | null;
+            next_text_offset: number | null;
             text_truncated: boolean;
             pages_total: number | null;
             pages_kept: number | null;
@@ -500,6 +510,9 @@ Returns:
             size_bytes: null,
             saved_path: null,
             text: null,
+            text_offset: null,
+            text_length: null,
+            next_text_offset: null,
             text_truncated: false,
             pages_total: null,
             pages_kept: null,
@@ -532,11 +545,22 @@ Returns:
                 file.pages_kept = extracted.pages_kept;
                 file.duplicate_pages_removed = extracted.duplicate_pages_removed;
                 file.repeated_lines_removed = extracted.repeated_lines_removed;
-                if (extracted.text !== null) {
-                  file.text_truncated = extracted.text.length > params.max_text_chars;
-                  file.text = extracted.text.slice(0, params.max_text_chars);
+                if (extracted.text !== null && textBudget <= 0) {
+                  file.text_offset = Math.min(params.text_offset, extracted.text.length);
+                  file.text_length = extracted.text.length;
+                  file.next_text_offset = file.text_offset < extracted.text.length ? file.text_offset : null;
+                  file.text_truncated = file.next_text_offset !== null;
+                  file.note = `Text not included: earlier files used this response's text budget. Call again with file_id="${connection.FileId}".`;
+                } else if (extracted.text !== null) {
+                  const slice = sliceTextAtLines(extracted.text, params.text_offset, textBudget);
+                  textBudget -= JSON.stringify(slice.text).length - 2;
+                  file.text = slice.text;
+                  file.text_offset = Math.min(params.text_offset, extracted.text.length);
+                  file.text_length = extracted.text.length;
+                  file.next_text_offset = slice.nextOffset;
+                  file.text_truncated = slice.nextOffset !== null;
                 }
-                file.note = extracted.note;
+                if (extracted.note) file.note = extracted.note;
               }
             } catch (error) {
               file.note = `Download failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -575,7 +599,10 @@ Returns:
             if (f.note) lines.push(`- **Note**: ${f.note}`);
             if (f.text) {
               lines.push("", "```", f.text, "```");
-              if (f.text_truncated) lines.push(`*Text truncated to ${params.max_text_chars} characters.*`);
+              if (f.next_text_offset !== null) {
+                lines.push(`*Text continues: ${f.next_text_offset} of ${f.text_length} characters shown. ` +
+                  `Call again with text_offset=${f.next_text_offset} and file_id="${f.file_id}" to read on.*`);
+              }
             }
             lines.push("");
           }

@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { cleanPages } from "../src/services/fileText.js";
+import { cleanPages, sliceTextAtLines } from "../src/services/fileText.js";
 
 /**
  * A made-up 4-page invoice printed three times (ORIGINAL, DUPLICATE, TRIPLICATE),
@@ -92,5 +92,44 @@ describe("PDF text cleanup (item 1)", () => {
   test("pages that differ in content are not treated as duplicates", () => {
     const cleaned = cleanPages([invoicePage("ORIGINAL", 0), invoicePage("ORIGINAL", 1)], { dedupePages: true, stripRepeatedLines: false });
     assert.equal(cleaned.duplicatePagesRemoved, 0);
+  });
+});
+
+describe("text paging (item 2)", () => {
+  // Made-up text with line breaks, quotes and non-ASCII characters (escaped size differs)
+  const text = Array.from({ length: 400 }, (_, i) =>
+    `${String(i + 1).padStart(5, "0")} "Label" Åäö row ${i + 1} ${"x".repeat(i % 37)}`).join("\n");
+
+  test("reading with text_offset/next_text_offset returns the full text, cut only at line breaks", () => {
+    const parts: string[] = [];
+    let offset: number | null = 0;
+    let calls = 0;
+    while (offset !== null) {
+      const slice = sliceTextAtLines(text, offset, 1000);
+      assert.ok(JSON.stringify(slice.text).length - 2 <= 1000, "slice fits the escaped budget");
+      if (slice.nextOffset !== null) {
+        assert.ok(slice.text.endsWith("\n"), "cut at a line break");
+      }
+      parts.push(slice.text);
+      offset = slice.nextOffset;
+      calls++;
+    }
+    assert.ok(calls > 5);
+    assert.equal(parts.join(""), text);
+  });
+
+  test("a line longer than the budget is still returned in parts", () => {
+    const long = "a".repeat(2500);
+    const first = sliceTextAtLines(long, 0, 1000);
+    assert.equal(first.text.length, 1000);
+    const second = sliceTextAtLines(long, first.nextOffset!, 1000);
+    const third = sliceTextAtLines(long, second.nextOffset!, 1000);
+    assert.equal(first.text + second.text + third.text, long);
+    assert.equal(third.nextOffset, null);
+  });
+
+  test("an exhausted budget returns no text and keeps the offset", () => {
+    assert.deepEqual(sliceTextAtLines(text, 42, 0), { text: "", nextOffset: 42 });
+    assert.deepEqual(sliceTextAtLines(text, text.length, 1000), { text: "", nextOffset: null });
   });
 });
