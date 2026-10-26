@@ -82,6 +82,34 @@ Add this configuration:
 
 That's it! You can now ask Claude to manage your Fortnox invoices, customers, and more.
 
+### Several companies
+
+One server can work with several Fortnox companies. Authorize each company into a named profile:
+
+```bash
+export FORTNOX_CLIENT_ID=your-client-id FORTNOX_CLIENT_SECRET=your-client-secret
+npm run get-token -- --profile alpha              # log in to Fortnox as company Alpha
+npm run get-token -- --profile beta --read-only   # tools that write are refused for Beta
+```
+
+Each profile is saved to `~/.fortnox-mcp/profiles/<name>.json` (owner-only permissions) together with the company's name and organisation number. Once profiles exist, the Claude Desktop config needs only `FORTNOX_CLIENT_ID` and `FORTNOX_CLIENT_SECRET`; `FORTNOX_REFRESH_TOKEN` is ignored. Restart Claude Desktop after adding a profile.
+
+With profiles:
+
+- Every tool takes a `company` argument. With more than one profile it is required and there is no default, so Claude cannot fall back to the wrong company silently.
+- Every result starts with the company it came from (a `company` field in JSON output, a first line in markdown).
+- Before a profile is first used, the server checks that its token really belongs to the recorded company and refuses the profile if it does not.
+- `fortnox_list_companies` lists the profiles.
+- `FORTNOX_PROFILES=alpha,beta` limits a server entry to some profiles, if you want separate entries per company.
+
+The server cannot see which chat or project is calling it, so tell Claude which company to use in each project's instructions, for example:
+
+> Use Fortnox company `alpha` for every Fortnox call in this project. Never use another company.
+
+or, for a project that compares companies:
+
+> This project covers Fortnox companies `alpha` and `beta`. Pass `company` on every call, label every figure with its company, and never add figures from different companies together unless I ask for a total.
+
 ---
 
 ## Features
@@ -189,7 +217,8 @@ npm run build
 |----------|----------|-------------|
 | `FORTNOX_CLIENT_ID` | Yes | Your Fortnox app client ID |
 | `FORTNOX_CLIENT_SECRET` | Yes | Your Fortnox app client secret |
-| `FORTNOX_REFRESH_TOKEN` | Yes | OAuth2 refresh token (only needed for initial setup; automatically persisted after first use) |
+| `FORTNOX_REFRESH_TOKEN` | Yes, unless profiles exist | OAuth2 refresh token (only needed for initial setup; automatically persisted after first use). Not used once [company profiles](#several-companies) exist |
+| `FORTNOX_PROFILES` | No | Comma-separated profiles this server may use (default: all in `~/.fortnox-mcp/profiles/`) |
 | `FORTNOX_ACCESS_TOKEN` | No | Current access token (auto-refreshed) |
 | `TRANSPORT` | No | `stdio` (default) or `http` |
 | `PORT` | No | HTTP port (default: 3000) |
