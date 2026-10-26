@@ -11,11 +11,46 @@
  *   4. Copy the authorization code from the redirect URL
  *   5. Paste it when prompted
  *   6. Save the refresh token to your environment
+ *
+ * Several companies:
+ *   npx tsx scripts/get-token.ts --profile <name> [--read-only]
+ *   Log in to Fortnox as the company you want, authorize, and the token is saved to
+ *   ~/.fortnox-mcp/profiles/<name>.json together with the company's name and
+ *   organisation number. Nothing secret is printed. Run once per company.
  */
 
 import http from "http";
 import { URL } from "url";
 import readline from "readline";
+import { assertValidProfileName, profilePath, readProfile, writeProfile } from "../src/auth/profiles.js";
+
+function parseArgs(argv: string[]): { profile: string | null; readOnly: boolean } {
+  let profile: string | null = null;
+  let readOnly = false;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--profile") {
+      profile = argv[++i] ?? "";
+    } else if (argv[i].startsWith("--profile=")) {
+      profile = argv[i].slice("--profile=".length);
+    } else if (argv[i] === "--read-only") {
+      readOnly = true;
+    } else {
+      console.error(`Unknown argument: ${argv[i]}`);
+      process.exit(1);
+    }
+  }
+  if (profile !== null) {
+    try {
+      assertValidProfileName(profile);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  }
+  return { profile, readOnly };
+}
+
+const ARGS = parseArgs(process.argv.slice(2));
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -105,7 +140,7 @@ async function getAuthorizationCode(): Promise<string> {
   });
 }
 
-async function exchangeCodeForTokens(code: string): Promise<{ access_token: string; refresh_token: string }> {
+async function exchangeCodeForTokens(code: string): Promise<{ access_token: string; refresh_token: string; expires_in: number; scope: string }> {
   const auth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
 
   const response = await fetch("https://apps.fortnox.se/oauth-v1/token", {
@@ -129,15 +164,58 @@ async function exchangeCodeForTokens(code: string): Promise<{ access_token: stri
   return response.json();
 }
 
+async function fetchCompany(accessToken: string): Promise<{ name: string; orgNumber: string; databaseNumber: number | string | null }> {
+  const response = await fetch("https://api.fortnox.se/3/companyinformation", {
+    headers: { "Authorization": `Bearer ${accessToken}`, "Accept": "application/json" }
+  });
+  if (!response.ok) {
+    throw new Error(`Could not read company information (HTTP ${response.status}). The companyinformation scope is required for profiles.`);
+  }
+  const info = (await response.json()).CompanyInformation;
+  return { name: info.CompanyName, orgNumber: info.OrganizationNumber, databaseNumber: info.DatabaseNumber ?? null };
+}
+
+async function saveProfile(name: string, tokens: { access_token: string; refresh_token: string; expires_in: number; scope: string }) {
+  const company = await fetchCompany(tokens.access_token);
+  const existing = readProfile(name);
+  if (existing?.company?.orgNumber && existing.company.orgNumber.replace(/\D/g, "") !== company.orgNumber.replace(/\D/g, "")) {
+    throw new Error(
+      `Profile "${name}" belongs to ${existing.company.name} (${existing.company.orgNumber}), but you authorized ` +
+      `${company.name} (${company.orgNumber}). Log in to the right company, or use another profile name.`
+    );
+  }
+  writeProfile(name, {
+    refreshToken: tokens.refresh_token,
+    accessToken: tokens.access_token,
+    expiresAt: Date.now() + tokens.expires_in * 1000,
+    scope: tokens.scope,
+    company,
+    readOnly: ARGS.readOnly || existing?.readOnly === true
+  });
+  console.log(`✓ Saved profile "${name}" for ${company.name} (${company.orgNumber})${ARGS.readOnly ? ", read-only" : ""}`);
+  console.log(`  ${profilePath(name)}\n`);
+  console.log("Restart your MCP client. Tools now take company: \"" + name + "\".");
+  console.log("The Claude Desktop config needs only FORTNOX_CLIENT_ID and FORTNOX_CLIENT_SECRET;");
+  console.log("FORTNOX_REFRESH_TOKEN is ignored once profiles exist.\n");
+}
+
 async function main() {
   try {
     console.log("Starting OAuth2 authorization flow...\n");
+    if (ARGS.profile) {
+      console.log(`Profile "${ARGS.profile}": log in to Fortnox as the company this profile is for.\n`);
+    }
 
     const code = await getAuthorizationCode();
     console.log("✓ Authorization code received\n");
 
     console.log("Exchanging code for tokens...\n");
     const tokens = await exchangeCodeForTokens(code);
+
+    if (ARGS.profile) {
+      await saveProfile(ARGS.profile, tokens);
+      return;
+    }
 
     console.log("╔════════════════════════════════════════════════════════════╗");
     console.log("║                    SUCCESS!                                 ║");
