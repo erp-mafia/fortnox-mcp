@@ -442,11 +442,15 @@ Args:
   - download (boolean): Download and save the files locally (default: true; local mode only)
   - output_dir (string): Where to save files (default: ~/.fortnox-mcp/attachments/supplier-invoice-<given_number>)
   - extract_text (boolean): Return extracted text from PDF/text files (default: true)
+  - dedupe_pages (boolean): Drop PDF pages that repeat an earlier page, e.g. DUPLICATE/TRIPLICATE copies (default: true)
+  - strip_repeated_lines (boolean): Keep only the first occurrence of header/footer lines repeated on almost every page (default: true)
   - max_text_chars (number): Max characters of text per file (default: 20000)
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
-  Each attached file with its Fortnox file ID, name, saved path, and extracted text where possible.`,
+  Each attached file with its Fortnox file ID, name, saved path, and extracted text where possible.
+  PDF text is marked with "--- Page N ---" (original page numbers) and reports pages_total,
+  pages_kept, duplicate_pages_removed and repeated_lines_removed. Line items are never removed.`,
       inputSchema: GetSupplierInvoiceFilesSchema,
       annotations: {
         readOnlyHint: true,
@@ -484,6 +488,10 @@ Returns:
             saved_path: string | null;
             text: string | null;
             text_truncated: boolean;
+            pages_total: number | null;
+            pages_kept: number | null;
+            duplicate_pages_removed: number;
+            repeated_lines_removed: number;
             note: string | null;
           } = {
             file_id: connection.FileId,
@@ -493,6 +501,10 @@ Returns:
             saved_path: null,
             text: null,
             text_truncated: false,
+            pages_total: null,
+            pages_kept: null,
+            duplicate_pages_removed: 0,
+            repeated_lines_removed: 0,
             note: null
           };
 
@@ -512,7 +524,14 @@ Returns:
               }
 
               if (params.extract_text) {
-                const extracted = await extractFileText(downloaded.data, downloaded.contentType, fileName);
+                const extracted = await extractFileText(downloaded.data, downloaded.contentType, fileName, {
+                  dedupePages: params.dedupe_pages,
+                  stripRepeatedLines: params.strip_repeated_lines
+                });
+                file.pages_total = extracted.pages_total;
+                file.pages_kept = extracted.pages_kept;
+                file.duplicate_pages_removed = extracted.duplicate_pages_removed;
+                file.repeated_lines_removed = extracted.repeated_lines_removed;
                 if (extracted.text !== null) {
                   file.text_truncated = extracted.text.length > params.max_text_chars;
                   file.text = extracted.text.slice(0, params.max_text_chars);
@@ -548,6 +567,10 @@ Returns:
             lines.push(`- **File ID**: ${f.file_id}`);
             if (f.content_type) lines.push(`- **Type**: ${f.content_type}`);
             if (f.size_bytes !== null) lines.push(`- **Size**: ${f.size_bytes} bytes`);
+            if (f.pages_total !== null) {
+              lines.push(`- **Pages**: ${f.pages_kept} of ${f.pages_total} kept ` +
+                `(${f.duplicate_pages_removed} duplicate pages and ${f.repeated_lines_removed} repeated header/footer lines removed)`);
+            }
             if (f.saved_path) lines.push(`- **Saved to**: ${f.saved_path}`);
             if (f.note) lines.push(`- **Note**: ${f.note}`);
             if (f.text) {

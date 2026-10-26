@@ -144,6 +144,12 @@ export const GetSupplierInvoiceFilesSchema = z.object({
   extract_text: z.boolean()
     .default(true)
     .describe("Return text extracted from PDF and text files, when possible"),
+  dedupe_pages: z.boolean()
+    .default(true)
+    .describe("Drop PDF pages that repeat an earlier page, ignoring copy labels (ORIGINAL, DUPLICATE, TRIPLICATE, COPY, KOPIA) and page numbers"),
+  strip_repeated_lines: z.boolean()
+    .default(true)
+    .describe("Keep only the first occurrence of header/footer lines that appear once on at least 80% of pages (PDFs with 3+ pages after deduplication). Line items are never removed."),
   max_text_chars: z.number()
     .int()
     .min(0)
