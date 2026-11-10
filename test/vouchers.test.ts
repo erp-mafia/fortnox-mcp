@@ -107,6 +107,50 @@ describe("fortnox_account_activity (issues 1 and 2)", () => {
   });
 });
 
+describe("fortnox_account_activity bounds the SIE work", () => {
+  const years = [1, 2, 3, 4, 5].map((id) => ({ Id: id, FromDate: `${2020 + id}-01-01`, ToDate: `${2020 + id}-12-31` }));
+  // One voucher per year on account 4010, dated in that year
+  const sieForYear = (id: number) => encodeCp437([
+    "#FLAGGA 0",
+    "#SIETYP 4",
+    '#KONTO 4010 "Inköp material och varor"',
+    `#VER A ${id} ${2020 + id}0615 "Inköp ${id}" ${2020 + id}0615`,
+    "{",
+    `#TRANS 4010 {} ${id * 100} "" "" 0`,
+    `#TRANS 1930 {} -${id * 100} "" "" 0`,
+    "}",
+    ""
+  ].join("\r\n"));
+  let fake: { requests: FakeRequest[] };
+
+  before(() => {
+    fake = installFakeFortnox([
+      (req) => (req.path === "/3/sie/4" ? { data: sieForYear(Number(req.params.financialyear)) } : undefined),
+      (req) => (req.path === "/3/financialyears" ? json({ FinancialYears: years }) : undefined)
+    ]);
+  });
+
+  test("refuses a date range covering more than 3 financial years without downloading any", async () => {
+    fake.requests.length = 0;
+    await assert.rejects(
+      callToolJson(client, "fortnox_account_activity", { account_number: 4010, from_date: "2021-01-01", to_date: "2024-12-31" }),
+      /covers 4 financial years/
+    );
+    assert.equal(fake.requests.filter((r) => r.path === "/3/sie/4").length, 0);
+  });
+
+  test("returns the newest max_transactions rows across years and still counts every match", async () => {
+    const out = await callToolJson(client, "fortnox_account_activity", {
+      account_number: 4010, from_date: "2022-01-01", to_date: "2024-12-31", max_transactions: 1
+    });
+    assert.deepEqual(out.financial_years_read, [2, 3, 4]);
+    assert.equal(out.matching_transactions, 3);
+    assert.equal(out.transactions_returned, 1);
+    assert.deepEqual(out.transactions.map((t: any) => t.voucher_number), [4]);
+    assert.equal(out.summary[0].total_debit, 900);
+  });
+});
+
 describe("fortnox_search_vouchers (issue 3)", () => {
   // 60 vouchers in FY 4; three mention "Acme". The detail endpoint answers 429 to
   // the first request for every third voucher, as Fortnox does when bursts exceed its limit.

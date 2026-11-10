@@ -36,6 +36,10 @@ import {
   type SearchVouchersInput
 } from "../schemas/vouchers.js";
 
+// Each financial year is one full SIE download and parse, so bound how many a call reads
+const MAX_SIE_YEARS_PER_CALL = 3;
+const MAX_UNBALANCED_LISTED = 20;
+
 // API response types
 interface VoucherListResponse {
   Vouchers: FortnoxVoucherListItem[];
@@ -453,7 +457,7 @@ Common use cases:
 
 Note: The Fortnox voucher API can't filter by account, so this tool reads the SIE 4 export
 (all vouchers and rows of the financial year, in one request) and filters it. Without
-financial_year it reads the years overlapping the date range, or the current year.
+financial_year it reads the years overlapping the date range (at most 3), or the current year.
 
 Args:
   - account_number (number): Single account number to filter by (1000-9999)
@@ -551,11 +555,22 @@ Examples:
 
         const accountSummary = new Map<number, { debit: number; credit: number; count: number }>();
         const unbalancedVouchers: string[] = [];
+        let unbalancedCount = 0;
+        let matchingCount = 0;
         let totalVouchers = 0;
         let vouchersScanned = 0;
 
+        const newestFirst = (a: { transaction_date: string; voucher_number: number }, b: { transaction_date: string; voucher_number: number }) =>
+          b.transaction_date.localeCompare(a.transaction_date) || b.voucher_number - a.voucher_number;
+
         // Read the SIE 4 export: every voucher and row of the year in one request
         const financialYears = await resolveFinancialYears(params.financial_year, fromDate, toDate);
+        if (financialYears.length > MAX_SIE_YEARS_PER_CALL) {
+          throw new Error(
+            `The date range covers ${financialYears.length} financial years; this tool reads at most ` +
+            `${MAX_SIE_YEARS_PER_CALL} per call. Narrow from_date/to_date or call once per financial_year.`
+          );
+        }
         for (const year of financialYears) {
           const sie = await fetchSie4(year);
           totalVouchers += sie.vouchers.length;
@@ -570,7 +585,10 @@ Examples:
               .filter((row) => !row.removed)
               .reduce((sum, row) => sum + row.amount, 0);
             if (Math.abs(activeSum) >= 0.005) {
-              unbalancedVouchers.push(`${voucher.series}${voucher.number}`);
+              unbalancedCount++;
+              if (unbalancedVouchers.length < MAX_UNBALANCED_LISTED) {
+                unbalancedVouchers.push(`${voucher.series}${voucher.number}`);
+              }
             }
 
             for (const row of voucher.rows) {
@@ -579,6 +597,7 @@ Examples:
 
               const debit = row.amount > 0 ? row.amount : 0;
               const credit = row.amount < 0 ? -row.amount : 0;
+              matchingCount++;
               matchingTransactions.push({
                 voucher_series: voucher.series,
                 voucher_number: voucher.number,
@@ -602,17 +621,16 @@ Examples:
               }
             }
           }
+
+          // Keep only the newest rows that can be returned; the summary already counts every match
+          matchingTransactions.sort(newestFirst);
+          matchingTransactions.length = Math.min(matchingTransactions.length, params.max_transactions);
         }
 
-        const warnings = unbalancedVouchers.length > 0
-          ? [`Active rows do not balance on: ${unbalancedVouchers.join(", ")}. Check these vouchers in Fortnox.`]
+        const unbalancedMore = unbalancedCount - unbalancedVouchers.length;
+        const warnings = unbalancedCount > 0
+          ? [`Active rows do not balance on: ${unbalancedVouchers.join(", ")}${unbalancedMore > 0 ? ` and ${unbalancedMore} more` : ""}. Check these vouchers in Fortnox.`]
           : [];
-
-        // Sort transactions by date descending
-        matchingTransactions.sort((a, b) =>
-          b.transaction_date.localeCompare(a.transaction_date) ||
-          b.voucher_number - a.voucher_number
-        );
 
         // Build output
         const summaryArray = params.include_summary
@@ -642,10 +660,10 @@ Examples:
           truncated: false,
           include_removed_rows: params.include_removed_rows,
           warnings,
-          matching_transactions: matchingTransactions.length,
-          transactions_returned: Math.min(matchingTransactions.length, params.max_transactions),
+          matching_transactions: matchingCount,
+          transactions_returned: matchingTransactions.length,
           summary: summaryArray,
-          transactions: matchingTransactions.slice(0, params.max_transactions)
+          transactions: matchingTransactions
         };
 
         // Format output
@@ -668,7 +686,7 @@ Examples:
             lines.push(`**Period**: ${dateRangeDescription}`);
           }
           lines.push(`**Financial Year**: ${financialYears.map((y) => y ?? "current").join(", ")}`);
-          lines.push(`**Vouchers Scanned**: ${vouchersScanned} | **Matching Transactions**: ${matchingTransactions.length}`);
+          lines.push(`**Vouchers Scanned**: ${vouchersScanned} | **Matching Transactions**: ${matchingCount}`);
 
           for (const warning of warnings) {
             lines.push("");
@@ -696,18 +714,15 @@ Examples:
             lines.push("| Date | Voucher | Account | Description | Debit | Credit |");
             lines.push("|------|---------|---------|-------------|-------|--------|");
 
-            const displayLimit = params.max_transactions;
-            const displayTransactions = matchingTransactions.slice(0, displayLimit);
-
-            for (const t of displayTransactions) {
+            for (const t of matchingTransactions) {
               const description = `${t.description || t.voucher_description}${t.removed ? " (removed)" : ""}`;
               lines.push(
                 `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
               );
             }
 
-            if (matchingTransactions.length > displayLimit) {
-              lines.push(`| ... | ... | ... | *${matchingTransactions.length - displayLimit} more transactions* | ... | ... |`);
+            if (matchingCount > matchingTransactions.length) {
+              lines.push(`| ... | ... | ... | *${matchingCount - matchingTransactions.length} more transactions* | ... | ... |`);
             }
           } else {
             lines.push("");
