@@ -12,6 +12,13 @@
  *   - FORTNOX_CLIENT_ID: Fortnox app client ID (can be embedded)
  *   - FORTNOX_CLIENT_SECRET: Fortnox app client secret (can be embedded)
  *   - FORTNOX_REFRESH_TOKEN: User's OAuth2 refresh token
+ *
+ *   Several companies: authorize each one into a profile with
+ *   `npm run get-token -- --profile <name>` (stored in ~/.fortnox-mcp/profiles/).
+ *   When profiles exist, every tool takes a `company` argument and
+ *   FORTNOX_REFRESH_TOKEN is not used.
+ *   - FORTNOX_PROFILES: optional comma-separated list limiting which profiles this
+ *     server instance can use
  *   - TRANSPORT: 'stdio' (default) or 'http'
  *   - PORT: HTTP server port (default: 3000)
  *
@@ -25,6 +32,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerAllTools } from "./tools/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
@@ -33,65 +41,52 @@ import { loadConfig, validateEnvironment, logConfig } from "./config.js";
 import { getFortnoxAuth } from "./services/auth.js";
 import { getStorageFromEnv } from "./auth/storage/index.js";
 import { runRemoteServer } from "./server/remote.js";
-import { registerCustomerTools } from "./tools/customers.js";
-import { registerInvoiceTools } from "./tools/invoices.js";
-import { registerSupplierTools } from "./tools/suppliers.js";
-import { registerAccountTools } from "./tools/accounts.js";
-import { registerVoucherTools } from "./tools/vouchers.js";
-import { registerCompanyTools } from "./tools/company.js";
-import { registerAnalyticsTools } from "./tools/analytics.js";
-import { registerSupplierInvoiceTools } from "./tools/supplierInvoices.js";
-import { registerOrderTools } from "./tools/orders.js";
-import { registerBIAnalyticsTools } from "./tools/biAnalytics.js";
+import { loadCompanyRegistry, type CompanyRegistry } from "./auth/companies.js";
+import { getFortnoxCredentials } from "./auth/credentials.js";
+import { companyServerInstructions } from "./tools/companies.js";
 
-function createMcpServer(): McpServer {
-  const server = new McpServer({
-    name: "fortnox-mcp-server",
-    version: "1.0.0"
-  });
+function createMcpServer(companies: CompanyRegistry | null): McpServer {
+  const server = new McpServer(
+    {
+      name: "fortnox-mcp-server",
+      version: "1.0.0"
+    },
+    companies && companies.names.length > 1 ? { instructions: companyServerInstructions(companies) } : undefined
+  );
 
-  registerCustomerTools(server);
-  registerInvoiceTools(server);
-  registerSupplierTools(server);
-  registerSupplierInvoiceTools(server);
-  registerAccountTools(server);
-  registerVoucherTools(server);
-  registerCompanyTools(server);
-  registerAnalyticsTools(server);
-  registerOrderTools(server);
-  registerBIAnalyticsTools(server);
+  registerAllTools(server, companies);
 
   return server;
 }
 
-async function runStdio(): Promise<void> {
+/** Company profiles if any exist, otherwise check the single-company env token */
+function loadLocalAuth(): CompanyRegistry | null {
   try {
+    const companies = loadCompanyRegistry();
+    if (companies) {
+      getFortnoxCredentials();
+      console.error(`[FortnoxMCP] Companies: ${companies.names.join(", ")}`);
+      return companies;
+    }
     const auth = getFortnoxAuth();
     if (!auth.isAuthenticated()) {
-      throw new Error("FORTNOX_REFRESH_TOKEN not set");
+      throw new Error("FORTNOX_REFRESH_TOKEN not set and no company profiles found");
     }
+    return null;
   } catch (error) {
     console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
+}
 
-  const server = createMcpServer();
+async function runStdio(): Promise<void> {
+  const server = createMcpServer(loadLocalAuth());
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
 async function runLocalHTTP(): Promise<void> {
-  try {
-    const auth = getFortnoxAuth();
-    if (!auth.isAuthenticated()) {
-      throw new Error("FORTNOX_REFRESH_TOKEN not set");
-    }
-  } catch (error) {
-    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-  }
-
-  const server = createMcpServer();
+  const server = createMcpServer(loadLocalAuth());
   const app = express();
   app.use(express.json());
 

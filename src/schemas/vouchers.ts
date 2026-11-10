@@ -92,6 +92,9 @@ export const GetVoucherSchema = z.object({
     .int()
     .optional()
     .describe("Fortnox financial year ID (1, 2, 3...). NOT calendar year. Use fortnox_list_financial_years to find the correct ID."),
+  include_removed_rows: z.boolean()
+    .default(false)
+    .describe("Count removed (struck-out correction) rows in the totals. Removed rows are always listed and flagged."),
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")
@@ -185,19 +188,27 @@ export const AccountActivitySchema = z.object({
   include_summary: z.boolean()
     .default(true)
     .describe("Include totals and summary per account"),
+  include_removed_rows: z.boolean()
+    .default(false)
+    .describe("Include removed (struck-out correction) rows in transactions and totals. Off by default so corrected rows are not double-counted."),
   max_vouchers: z.number()
     .int()
     .min(10)
     .max(500)
-    .default(500)
-    .describe("Maximum vouchers to scan (10-500). Use date filtering for larger datasets."),
+    .optional()
+    .describe("Ignored. Kept for compatibility: the tool now reads the whole financial year from the SIE export."),
+  max_transactions: z.number()
+    .int()
+    .min(1)
+    .max(1000)
+    .default(100)
+    .describe("Maximum transactions to return, newest first (1-1000). The summary always covers all matches."),
   response_format: z.nativeEnum(ResponseFormat)
     .default(ResponseFormat.MARKDOWN)
     .describe("Output format: 'markdown' or 'json'")
-}).strict().refine(
-  (data) => data.account_number !== undefined || data.account_numbers !== undefined || data.account_range !== undefined,
-  { message: "Must specify at least one of: account_number, account_numbers, or account_range" }
-);
+}).strict();
+// No .refine() here: the MCP SDK advertises a refined schema as having no properties,
+// so clients send untyped arguments. The "at least one account filter" check is in the handler.
 
 export type AccountActivityInput = z.infer<typeof AccountActivitySchema>;
 
@@ -234,6 +245,9 @@ export const SearchVouchersSchema = z.object({
   include_rows: z.boolean()
     .default(false)
     .describe("Include full voucher row details in results"),
+  include_removed_rows: z.boolean()
+    .default(false)
+    .describe("With include_rows, also return removed (struck-out correction) rows. Off by default."),
   max_vouchers: z.number()
     .int()
     .min(10)

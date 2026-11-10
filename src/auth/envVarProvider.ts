@@ -24,12 +24,24 @@ export class EnvVarTokenProvider implements ITokenProvider {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
 
-    // Initialize tokens: prefer persisted file (has latest refresh token),
-    // fall back to environment variables for first-time setup
+    // Initialize tokens: prefer the persisted file, which holds the latest rotated
+    // refresh token. But Fortnox invalidates old refresh tokens, so if the user has
+    // re-authorized and put a new token in FORTNOX_REFRESH_TOKEN, the persisted one is
+    // dead and preferring it would lock them out. We detect that by recording which env
+    // token a persisted file originated from and comparing it against the current one.
     const persisted = readPersistedTokens();
     const envRefreshToken = process.env.FORTNOX_REFRESH_TOKEN;
 
-    if (persisted?.refreshToken) {
+    if (persisted?.refreshToken && envRefreshToken && persisted.envRefreshToken && persisted.envRefreshToken !== envRefreshToken) {
+      // Env var changed since the file was written — user re-authorized, so use it.
+      // Blank access token and expiry force an immediate refresh.
+      this.tokens = {
+        accessToken: "",
+        refreshToken: envRefreshToken,
+        expiresAt: 0,
+        scope: process.env.FORTNOX_SCOPE || ""
+      };
+    } else if (persisted?.refreshToken) {
       this.tokens = {
         accessToken: persisted.accessToken || "",
         refreshToken: persisted.refreshToken,
@@ -141,6 +153,38 @@ export class EnvVarTokenProvider implements ITokenProvider {
       this.storeTokens(response.data);
       return this.tokens!.accessToken;
     } catch (error) {
+      // The token we just tried came from the persisted file. If the env var holds a
+      // different one, the user has re-authorized since we last persisted, so retry
+      // with it. This also covers upgrades from before envRefreshToken was recorded,
+      // where the constructor has no marker to compare against.
+      const envRefreshToken = process.env.FORTNOX_REFRESH_TOKEN;
+      if (envRefreshToken && envRefreshToken !== this.tokens?.refreshToken) {
+        try {
+          const fallbackResponse = await axios.post<TokenResponse>(
+            tokenUrl,
+            new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: envRefreshToken
+            }),
+            {
+              headers: {
+                "Authorization": `Basic ${auth}`,
+                "Content-Type": "application/x-www-form-urlencoded"
+              }
+            }
+          );
+          this.storeTokens(fallbackResponse.data);
+          return this.tokens!.accessToken;
+        } catch (fallbackError) {
+          // Both tokens are dead. Report the env var failure — that is the credential
+          // the user most recently supplied, so its error is the actionable one.
+          this.tokens = null;
+          throw this.handleAuthError(
+            fallbackError,
+            "Failed to refresh access token using FORTNOX_REFRESH_TOKEN"
+          );
+        }
+      }
       this.tokens = null;
       throw this.handleAuthError(error, "Failed to refresh access token");
     }
@@ -155,7 +199,9 @@ export class EnvVarTokenProvider implements ITokenProvider {
       scope: response.scope
     };
     // Persist to file so new refresh token survives process restarts
-    persistTokens(response.refresh_token, response.access_token, expiresAt, response.scope);
+    // Track the original env var token so we can detect re-authorization
+    const envRefreshToken = process.env.FORTNOX_REFRESH_TOKEN;
+    persistTokens(response.refresh_token, response.access_token, expiresAt, response.scope, envRefreshToken);
   }
 
   private handleAuthError(error: unknown, context: string): Error {

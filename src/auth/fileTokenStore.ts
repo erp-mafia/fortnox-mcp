@@ -7,6 +7,7 @@ interface PersistedTokens {
   accessToken?: string;
   expiresAt?: number;
   scope?: string;
+  envRefreshToken?: string;
   updatedAt: number;
 }
 
@@ -35,15 +36,19 @@ export function persistTokens(
   refreshToken: string,
   accessToken: string,
   expiresAt: number,
-  scope: string
+  scope: string,
+  envRefreshToken?: string
 ): void {
   try {
     ensureDir();
+    // Preserve the original env refresh token if not provided
+    const existing = envRefreshToken ? null : readPersistedTokens();
     const data: PersistedTokens = {
       refreshToken,
       accessToken,
       expiresAt,
       scope,
+      envRefreshToken: envRefreshToken || existing?.envRefreshToken || refreshToken,
       updatedAt: Date.now(),
     };
     writeFileSync(TOKEN_FILE, JSON.stringify(data, null, 2), {

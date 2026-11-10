@@ -5,9 +5,19 @@ export const FORTNOX_OAUTH_URL = "https://apps.fortnox.se/oauth-v1";
 // Rate limiting: 25 requests per 5 seconds
 export const RATE_LIMIT_REQUESTS = 25;
 export const RATE_LIMIT_WINDOW_MS = 5000;
+// Retries for HTTP 429 (backoff doubles from the base delay unless Fortnox sends Retry-After)
+export const RATE_LIMIT_MAX_RETRIES = 5;
+export const RATE_LIMIT_RETRY_BASE_MS = 1000;
+
+// Fortnox error code for "Har inte behörighet för scope" (token lacks a scope)
+export const FORTNOX_MISSING_SCOPE_CODE = 2000663;
 
 // Response limits
 export const CHARACTER_LIMIT = 25000;
+// Extracted file text per response (all files combined, measured as JSON-escaped
+// characters). Leaves room within CHARACTER_LIMIT for the JSON structure and metadata.
+export const MAX_FILE_TEXT_CHARS = 18000;
+export const DEFAULT_FILE_TEXT_CHARS = 15000;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ResponseFormat, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../constants.js";
+import { ResponseFormat, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_FILE_TEXT_CHARS, DEFAULT_FILE_TEXT_CHARS } from "../constants.js";
 import { DatePeriodEnum } from "./invoices.js";
 
 /**
@@ -23,10 +23,11 @@ export const ListSupplierInvoicesSchema = z.object({
     "unpaid",
     "unpaidoverdue",
     "unbooked",
-    "pendingpayment"
+    "pendingpayment",
+    "authorizepending"
   ])
     .optional()
-    .describe("Filter supplier invoices by status"),
+    .describe("Filter supplier invoices by status (applied by Fortnox). Note: Fortnox's 'unbooked' leaves out cancelled invoices and invoices waiting for approval ('authorizepending'); use booked=false to get every invoice that is not booked."),
   supplier_number: z.string()
     .max(50)
     .optional()
@@ -59,6 +60,9 @@ export const ListSupplierInvoicesSchema = z.object({
   fetch_all: z.boolean()
     .default(false)
     .describe("Fetch all results by auto-paginating through all pages. WARNING: May take time for large datasets (max 10,000 results)."),
+  booked: z.boolean()
+    .optional()
+    .describe("Client-side filter on the Booked flag. booked=false returns every unbooked invoice, including ones waiting for approval and cancelled ones (status 'cancelled'). Reads all pages (like fetch_all) because the filter is applied after fetching."),
   min_amount: z.number()
     .min(0)
     .optional()
@@ -126,3 +130,46 @@ export const PayablesReportSchema = z.object({
 }).strict();
 
 export type PayablesReportInput = z.infer<typeof PayablesReportSchema>;
+
+/**
+ * Schema for listing and downloading a supplier invoice's attached files
+ */
+export const GetSupplierInvoiceFilesSchema = z.object({
+  given_number: z.string()
+    .min(1)
+    .describe("The supplier invoice given number whose attachments to fetch"),
+  download: z.boolean()
+    .default(true)
+    .describe("Download the files and save them locally (local mode only). If false, only list them."),
+  output_dir: z.string()
+    .optional()
+    .describe("Directory to save files in (default: ~/.fortnox-mcp/attachments/supplier-invoice-<given_number>)"),
+  extract_text: z.boolean()
+    .default(true)
+    .describe("Return text extracted from PDF and text files, when possible"),
+  dedupe_pages: z.boolean()
+    .default(true)
+    .describe("Drop PDF pages that repeat an earlier page, ignoring copy labels (ORIGINAL, DUPLICATE, TRIPLICATE, COPY, KOPIA) and page numbers"),
+  strip_repeated_lines: z.boolean()
+    .default(true)
+    .describe("Keep only the first occurrence of header/footer lines that appear once on at least 80% of pages (PDFs with 3+ pages after deduplication). Line items are never removed."),
+  max_text_chars: z.number()
+    .int()
+    .min(500)
+    .max(MAX_FILE_TEXT_CHARS)
+    .default(DEFAULT_FILE_TEXT_CHARS)
+    .describe(`Maximum characters of extracted text in this response, all files combined (500-${MAX_FILE_TEXT_CHARS}). Text is cut at a line break; use next_text_offset to read on.`),
+  text_offset: z.number()
+    .int()
+    .min(0)
+    .default(0)
+    .describe("Character offset to start the text from, for reading on after a cut. Pass the next_text_offset from the previous response (applies to every returned file; use file_id to page through one file)."),
+  file_id: z.string()
+    .optional()
+    .describe("Only return this attached file (its Fortnox file ID), e.g. when paging through one file's text"),
+  response_format: z.nativeEnum(ResponseFormat)
+    .default(ResponseFormat.MARKDOWN)
+    .describe("Output format: 'markdown' or 'json'")
+}).strict();
+
+export type GetSupplierInvoiceFilesInput = z.infer<typeof GetSupplierInvoiceFilesSchema>;

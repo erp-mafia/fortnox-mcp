@@ -1,5 +1,8 @@
+import { mkdirSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { basename, join, resolve } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { fortnoxRequest, fetchAllPages } from "../services/api.js";
+import { fortnoxRequest, fortnoxDownload, fetchAllPages } from "../services/api.js";
 import { ResponseFormat } from "../constants.js";
 import {
   buildToolResponse,
@@ -20,11 +23,15 @@ import {
   GetSupplierInvoiceSchema,
   ApproveSupplierInvoiceSchema,
   PayablesReportSchema,
+  GetSupplierInvoiceFilesSchema,
+  type GetSupplierInvoiceFilesInput,
   type ListSupplierInvoicesInput,
   type GetSupplierInvoiceInput,
   type ApproveSupplierInvoiceInput,
   type PayablesReportInput
 } from "../schemas/supplierInvoices.js";
+import { normalizeSupplierInvoice, getSupplierInvoiceStatus } from "../services/supplierInvoices.js";
+import { extractFileText, sliceTextAtLines } from "../services/fileText.js";
 
 // API response types
 interface FortnoxSupplierInvoiceRow {
@@ -87,14 +94,22 @@ interface SupplierInvoiceResponse {
   SupplierInvoice: FortnoxSupplierInvoice;
 }
 
-/**
- * Get supplier invoice status
- */
-function getSupplierInvoiceStatus(inv: FortnoxSupplierInvoiceListItem): string {
-  if (inv.Cancelled) return "cancelled";
-  if ((inv.Balance || 0) === 0) return "paid";
-  if (!inv.Booked) return "draft";
-  return "unpaid";
+interface FortnoxSupplierInvoiceFileConnection {
+  FileId: string;
+  Name?: string;
+  SupplierInvoiceNumber: string;
+  SupplierName?: string;
+  "@url"?: string;
+}
+
+interface SupplierInvoiceFileConnectionListResponse {
+  SupplierInvoiceFileConnections: FortnoxSupplierInvoiceFileConnection[];
+}
+
+/** Keep a Fortnox-supplied file name safe to use inside the output directory */
+function safeFileName(name: string, fallback: string): string {
+  const cleaned = basename(name).replace(/[\x00-\x1f<>:"/\\|?*]/g, "_").trim();
+  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
 }
 
 /**
@@ -113,7 +128,8 @@ Retrieves a paginated list of supplier invoices with optional filtering by statu
 Args:
   - limit (number): Max results per page, 1-100 (default: 20)
   - page (number): Page number for pagination (default: 1)
-  - filter ('cancelled' | 'fullypaid' | 'unpaid' | 'unpaidoverdue' | 'unbooked' | 'pendingpayment'): Filter by invoice status
+  - filter ('cancelled' | 'fullypaid' | 'unpaid' | 'unpaidoverdue' | 'unbooked' | 'pendingpayment' | 'authorizepending'): Filter by invoice status, applied by Fortnox ('authorizepending' = waiting for approval/attest). Fortnox's 'unbooked' leaves out cancelled invoices and invoices waiting for approval
+  - booked (boolean): Client-side filter on the Booked flag; booked=false returns every unbooked invoice (reads all pages)
   - supplier_number (string): Filter by supplier number
   - from_date (string): Filter invoices from this date (YYYY-MM-DD)
   - to_date (string): Filter invoices to this date (YYYY-MM-DD)
@@ -133,7 +149,8 @@ Returns:
 Examples:
   - List unpaid supplier invoices: filter="unpaid"
   - Last month's supplier invoices: period="last_month"
-  - Supplier invoices this year: supplier_number="1", period="this_year"`,
+  - Supplier invoices this year: supplier_number="1", period="this_year"
+  - Every invoice that is not booked yet: booked=false`,
       inputSchema: ListSupplierInvoicesSchema,
       annotations: {
         readOnlyHint: true,
@@ -172,13 +189,15 @@ Examples:
         let pagesFetched = 1;
         let truncated = false;
         let truncationReason: string | undefined;
+        // A client-side Booked filter on one page would miss matches on other pages
+        const fetchAll = params.fetch_all || params.booked !== undefined;
 
-        if (params.fetch_all) {
+        if (fetchAll) {
           // Use fetchAllPages for complete dataset
           const result = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
             "/3/supplierinvoices",
             queryParams,
-            (r) => r.SupplierInvoices || [],
+            (r) => (r.SupplierInvoices || []).map(normalizeSupplierInvoice),
             (r) => r.MetaInformation?.["@TotalResources"] || 0
           );
           invoices = result.items;
@@ -192,11 +211,14 @@ Examples:
           queryParams.page = params.page;
 
           const response = await fortnoxRequest<SupplierInvoiceListResponse>("/3/supplierinvoices", "GET", undefined, queryParams);
-          invoices = response.SupplierInvoices || [];
+          invoices = (response.SupplierInvoices || []).map(normalizeSupplierInvoice);
           total = response.MetaInformation?.["@TotalResources"] || invoices.length;
         }
 
-        // Apply client-side amount filters
+        // Apply client-side filters
+        if (params.booked !== undefined) {
+          invoices = invoices.filter(inv => (inv.Booked ?? false) === params.booked);
+        }
         if (params.min_amount !== undefined) {
           invoices = invoices.filter(inv => (inv.Total || 0) >= params.min_amount!);
         }
@@ -205,7 +227,7 @@ Examples:
         }
 
         // Build pagination metadata
-        const paginationMeta = params.fetch_all
+        const paginationMeta = fetchAll
           ? {
               total,
               count: invoices.length,
@@ -246,7 +268,7 @@ Examples:
             ? `Supplier Invoices - ${getPeriodDescription(params.period)}`
             : "Supplier Invoices";
 
-          if (params.fetch_all) {
+          if (fetchAll) {
             const lines: string[] = [
               `# ${title}`,
               "",
@@ -326,7 +348,7 @@ Returns:
         const response = await fortnoxRequest<SupplierInvoiceResponse>(
           `/3/supplierinvoices/${encodeURIComponent(params.given_number)}`
         );
-        const invoice = response.SupplierInvoice;
+        const invoice = normalizeSupplierInvoice(response.SupplierInvoice);
 
         const output = {
           given_number: invoice.GivenNumber,
@@ -410,6 +432,197 @@ Returns:
     }
   );
 
+  // Get supplier invoice attachments (read-only)
+  server.registerTool(
+    "fortnox_get_supplier_invoice_files",
+    {
+      title: "Get Supplier Invoice Files",
+      description: `List the files attached to a supplier invoice (usually the supplier's PDF), download them and return their text.
+
+Use this when the accounting rows from fortnox_get_supplier_invoice are not enough, e.g. to see
+article lines, quantities or unit prices that are only on the original invoice document.
+
+Requires the Fortnox OAuth scopes 'connectfile' (file connections) and 'archive' (file download).
+
+Args:
+  - given_number (string): Supplier invoice given number (required)
+  - download (boolean): Download and save the files locally (default: true; local mode only)
+  - output_dir (string): Where to save files (default: ~/.fortnox-mcp/attachments/supplier-invoice-<given_number>)
+  - extract_text (boolean): Return extracted text from PDF/text files (default: true)
+  - dedupe_pages (boolean): Drop PDF pages that repeat an earlier page, e.g. DUPLICATE/TRIPLICATE copies (default: true)
+  - strip_repeated_lines (boolean): Keep only the first occurrence of header/footer lines repeated on almost every page (default: true)
+  - max_text_chars (number): Max characters of text in this response, all files combined (default: 15000, max: 18000)
+  - text_offset (number): Start the text at this offset; pass next_text_offset from the previous call (default: 0)
+  - file_id (string): Only return this attached file, e.g. to page through one file's text
+  - response_format ('markdown' | 'json'): Output format
+
+Returns:
+  Each attached file with its Fortnox file ID, name, saved path, and extracted text where possible.
+  PDF text is marked with "--- Page N ---" (original page numbers) and reports pages_total,
+  pages_kept, duplicate_pages_removed and repeated_lines_removed. Line items are never removed.
+  Long text is cut at a line break. When a file's text continues, next_text_offset is set:
+  call again with text_offset=<next_text_offset> (and file_id) to read the rest.`,
+      inputSchema: GetSupplierInvoiceFilesSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params: GetSupplierInvoiceFilesInput) => {
+      try {
+        const response = await fortnoxRequest<SupplierInvoiceFileConnectionListResponse>(
+          "/3/supplierinvoicefileconnections",
+          "GET",
+          undefined,
+          { supplierinvoicenumber: params.given_number }
+        );
+        // Filter client-side as well, in case the API ignores the query parameter
+        const connections = (response.SupplierInvoiceFileConnections || [])
+          .filter((c) => String(c.SupplierInvoiceNumber) === params.given_number)
+          .filter((c) => params.file_id === undefined || c.FileId === params.file_id);
+        // Text budget shared by all files so the whole response stays within the size limit
+        let textBudget = params.max_text_chars;
+
+        // Saving to disk only makes sense when the server runs on the user's machine
+        const canSave = process.env.AUTH_MODE !== "remote";
+        const shouldDownload = params.download || params.extract_text;
+        const outputDir = resolve(
+          params.output_dir || join(homedir(), ".fortnox-mcp", "attachments", `supplier-invoice-${safeFileName(params.given_number, "unknown")}`)
+        );
+
+        const files = [];
+        for (const connection of connections) {
+          const file: {
+            file_id: string;
+            name: string | null;
+            content_type: string | null;
+            size_bytes: number | null;
+            saved_path: string | null;
+            text: string | null;
+            text_offset: number | null;
+            text_length: number | null;
+            next_text_offset: number | null;
+            text_truncated: boolean;
+            pages_total: number | null;
+            pages_kept: number | null;
+            duplicate_pages_removed: number;
+            repeated_lines_removed: number;
+            note: string | null;
+          } = {
+            file_id: connection.FileId,
+            name: connection.Name || null,
+            content_type: null,
+            size_bytes: null,
+            saved_path: null,
+            text: null,
+            text_offset: null,
+            text_length: null,
+            next_text_offset: null,
+            text_truncated: false,
+            pages_total: null,
+            pages_kept: null,
+            duplicate_pages_removed: 0,
+            repeated_lines_removed: 0,
+            note: null
+          };
+
+          if (shouldDownload) {
+            try {
+              const downloaded = await fortnoxDownload(`/3/archive/${encodeURIComponent(connection.FileId)}`);
+              file.content_type = downloaded.contentType;
+              file.size_bytes = downloaded.data.length;
+              const fileName = safeFileName(connection.Name || downloaded.fileName || "", `${connection.FileId}`);
+              file.name = file.name || fileName;
+
+              if (params.download && canSave) {
+                mkdirSync(outputDir, { recursive: true });
+                const savedPath = join(outputDir, fileName);
+                writeFileSync(savedPath, downloaded.data);
+                file.saved_path = savedPath;
+              }
+
+              if (params.extract_text) {
+                const extracted = await extractFileText(downloaded.data, downloaded.contentType, fileName, {
+                  dedupePages: params.dedupe_pages,
+                  stripRepeatedLines: params.strip_repeated_lines
+                });
+                file.pages_total = extracted.pages_total;
+                file.pages_kept = extracted.pages_kept;
+                file.duplicate_pages_removed = extracted.duplicate_pages_removed;
+                file.repeated_lines_removed = extracted.repeated_lines_removed;
+                if (extracted.text !== null && textBudget <= 0) {
+                  file.text_offset = Math.min(params.text_offset, extracted.text.length);
+                  file.text_length = extracted.text.length;
+                  file.next_text_offset = file.text_offset < extracted.text.length ? file.text_offset : null;
+                  file.text_truncated = file.next_text_offset !== null;
+                  file.note = `Text not included: earlier files used this response's text budget. Call again with file_id="${connection.FileId}".`;
+                } else if (extracted.text !== null) {
+                  const slice = sliceTextAtLines(extracted.text, params.text_offset, textBudget);
+                  textBudget -= JSON.stringify(slice.text).length - 2;
+                  file.text = slice.text;
+                  file.text_offset = Math.min(params.text_offset, extracted.text.length);
+                  file.text_length = extracted.text.length;
+                  file.next_text_offset = slice.nextOffset;
+                  file.text_truncated = slice.nextOffset !== null;
+                }
+                if (extracted.note) file.note = extracted.note;
+              }
+            } catch (error) {
+              file.note = `Download failed: ${error instanceof Error ? error.message : String(error)}`;
+            }
+          }
+
+          files.push(file);
+        }
+
+        const output = {
+          given_number: params.given_number,
+          supplier_name: connections[0]?.SupplierName || null,
+          file_count: files.length,
+          output_dir: params.download && canSave && files.some((f) => f.saved_path) ? outputDir : null,
+          files
+        };
+
+        let textContent: string;
+        if (params.response_format === ResponseFormat.JSON) {
+          textContent = JSON.stringify(output, null, 2);
+        } else if (files.length === 0) {
+          textContent = `# Supplier Invoice #${params.given_number} Files\n\nNo files are attached to this supplier invoice.`;
+        } else {
+          const lines = [`# Supplier Invoice #${params.given_number} Files`, ""];
+          if (output.supplier_name) lines.push(`**Supplier**: ${output.supplier_name}`, "");
+          for (const f of files) {
+            lines.push(`## ${f.name || f.file_id}`);
+            lines.push(`- **File ID**: ${f.file_id}`);
+            if (f.content_type) lines.push(`- **Type**: ${f.content_type}`);
+            if (f.size_bytes !== null) lines.push(`- **Size**: ${f.size_bytes} bytes`);
+            if (f.pages_total !== null) {
+              lines.push(`- **Pages**: ${f.pages_kept} of ${f.pages_total} kept ` +
+                `(${f.duplicate_pages_removed} duplicate pages and ${f.repeated_lines_removed} repeated header/footer lines removed)`);
+            }
+            if (f.saved_path) lines.push(`- **Saved to**: ${f.saved_path}`);
+            if (f.note) lines.push(`- **Note**: ${f.note}`);
+            if (f.text) {
+              lines.push("", "```", f.text, "```");
+              if (f.next_text_offset !== null) {
+                lines.push(`*Text continues: ${f.next_text_offset} of ${f.text_length} characters shown. ` +
+                  `Call again with text_offset=${f.next_text_offset} and file_id="${f.file_id}" to read on.*`);
+              }
+            }
+            lines.push("");
+          }
+          textContent = lines.join("\n");
+        }
+
+        return buildToolResponse(textContent, output);
+      } catch (error) {
+        return buildErrorResponse(error);
+      }
+    }
+  );
+
   // Approve supplier invoice for payment
   server.registerTool(
     "fortnox_approve_supplier_invoice",
@@ -439,7 +652,7 @@ Returns:
           `/3/supplierinvoices/${encodeURIComponent(params.given_number)}/approvalpayment`,
           "PUT"
         );
-        const invoice = response.SupplierInvoice;
+        const invoice = normalizeSupplierInvoice(response.SupplierInvoice);
 
         const output = {
           success: true,
@@ -522,7 +735,7 @@ Examples:
         const result = await fetchAllPages<FortnoxSupplierInvoiceListItem, SupplierInvoiceListResponse>(
           "/3/supplierinvoices",
           queryParams,
-          (r) => r.SupplierInvoices || [],
+          (r) => (r.SupplierInvoices || []).map(normalizeSupplierInvoice),
           (r) => r.MetaInformation?.["@TotalResources"] || 0
         );
 

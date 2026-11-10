@@ -82,6 +82,34 @@ Add this configuration:
 
 That's it! You can now ask Claude to manage your Fortnox invoices, customers, and more.
 
+### Several companies
+
+One server can work with several Fortnox companies. Authorize each company into a named profile:
+
+```bash
+export FORTNOX_CLIENT_ID=your-client-id FORTNOX_CLIENT_SECRET=your-client-secret
+npm run get-token -- --profile alpha              # log in to Fortnox as company Alpha
+npm run get-token -- --profile beta --read-only   # tools that write are refused for Beta
+```
+
+Each profile is saved to `~/.fortnox-mcp/profiles/<name>.json` (owner-only permissions) together with the company's name and organisation number. Once profiles exist, the Claude Desktop config needs only `FORTNOX_CLIENT_ID` and `FORTNOX_CLIENT_SECRET`; `FORTNOX_REFRESH_TOKEN` is ignored. Restart Claude Desktop after adding a profile.
+
+With profiles:
+
+- Every tool takes a `company` argument. With more than one profile it is required and there is no default, so Claude cannot fall back to the wrong company silently.
+- Every result starts with the company it came from (a `company` field in JSON output, a first line in markdown).
+- Before a profile is first used, the server checks that its token really belongs to the recorded company and refuses the profile if it does not.
+- `fortnox_list_companies` lists the profiles.
+- `FORTNOX_PROFILES=alpha,beta` limits a server entry to some profiles, if you want separate entries per company.
+
+The server cannot see which chat or project is calling it, so tell Claude which company to use in each project's instructions, for example:
+
+> Use Fortnox company `alpha` for every Fortnox call in this project. Never use another company.
+
+or, for a project that compares companies:
+
+> This project covers Fortnox companies `alpha` and `beta`. Pass `company` on every call, label every figure with its company, and never add figures from different companies together unless I ask for a total.
+
 ---
 
 ## Features
@@ -113,6 +141,7 @@ That's it! You can now ask Claude to manage your Fortnox invoices, customers, an
 ### Supplier Invoice Management
 - `fortnox_list_supplier_invoices` - List supplier invoices with filtering
 - `fortnox_get_supplier_invoice` - Get supplier invoice details
+- `fortnox_get_supplier_invoice_files` - Download a supplier invoice's attached files (e.g. the PDF) and extract their text. Duplicate copies (ORIGINAL/DUPLICATE/TRIPLICATE) and repeated headers/footers are removed; long text is returned in pages (pass `next_text_offset` back as `text_offset`)
 - `fortnox_approve_supplier_invoice` - Approve supplier invoice for payment
 - `fortnox_payables_report` - Get accounts payable aging report
 
@@ -188,7 +217,8 @@ npm run build
 |----------|----------|-------------|
 | `FORTNOX_CLIENT_ID` | Yes | Your Fortnox app client ID |
 | `FORTNOX_CLIENT_SECRET` | Yes | Your Fortnox app client secret |
-| `FORTNOX_REFRESH_TOKEN` | Yes | OAuth2 refresh token (only needed for initial setup; automatically persisted after first use) |
+| `FORTNOX_REFRESH_TOKEN` | Yes, unless profiles exist | OAuth2 refresh token (only needed for initial setup; automatically persisted after first use). Not used once [company profiles](#several-companies) exist |
+| `FORTNOX_PROFILES` | No | Comma-separated profiles this server may use (default: all in `~/.fortnox-mcp/profiles/`) |
 | `FORTNOX_ACCESS_TOKEN` | No | Current access token (auto-refreshed) |
 | `TRANSPORT` | No | `stdio` (default) or `http` |
 | `PORT` | No | HTTP port (default: 3000) |
@@ -211,9 +241,19 @@ npm run build
 ### Getting OAuth Credentials
 
 1. Register as a developer at [Fortnox Developer Portal](https://developer.fortnox.se)
-2. Create a new application to get Client ID and Client Secret
-3. Complete the OAuth2 authorization flow to obtain a refresh token
-4. Set the environment variables
+2. Create a new application to get your **Client ID** and **Client Secret**
+3. Make sure the following **scopes** are enabled for your app: `companyinformation`, `customer`, `invoice`, `supplier`, `supplierinvoice`, `bookkeeping`, `connectfile`, `archive`
+4. Set your redirect URI to `http://localhost:8888/callback` in your Fortnox app settings
+5. Run the token helper script:
+
+   ```bash
+   FORTNOX_CLIENT_ID=your-client-id FORTNOX_CLIENT_SECRET=your-client-secret npm run get-token
+   ```
+
+6. A URL will be printed — open it in your browser
+7. Log in to Fortnox and authorize the application
+8. You'll be redirected back automatically and the script will display your **Refresh Token**
+9. Use the displayed credentials in your environment variables or Claude Desktop config
 
 ## Usage
 

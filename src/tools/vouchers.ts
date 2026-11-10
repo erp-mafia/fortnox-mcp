@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fortnoxRequest, fetchAllPages } from "../services/api.js";
-import { ResponseFormat, FETCH_ALL_DELAY_MS } from "../constants.js";
+import { ResponseFormat } from "../constants.js";
 import {
   buildToolResponse,
   buildErrorResponse,
@@ -10,6 +10,17 @@ import {
   buildPaginationMeta
 } from "../services/formatters.js";
 import { periodToDateRange, getPeriodDescription } from "../services/dateHelpers.js";
+import {
+  type FortnoxVoucher,
+  type FortnoxVoucherListItem,
+  mapVoucherRow,
+  countedRows,
+  summarizeVoucherRows,
+  unbalancedWarning,
+  fetchVoucherDetails,
+  failureWarning
+} from "../services/vouchers.js";
+import { fetchSie4, resolveFinancialYears } from "../services/sie.js";
 import {
   ListVouchersSchema,
   GetVoucherSchema,
@@ -25,34 +36,11 @@ import {
   type SearchVouchersInput
 } from "../schemas/vouchers.js";
 
+// Each financial year is one full SIE download and parse, so bound how many a call reads
+const MAX_SIE_YEARS_PER_CALL = 3;
+const MAX_UNBALANCED_LISTED = 20;
+
 // API response types
-interface FortnoxVoucherRow {
-  Account: number;
-  Debit?: number;
-  Credit?: number;
-  Description?: string;
-  CostCenter?: string;
-  Project?: string;
-}
-
-interface FortnoxVoucher {
-  VoucherSeries: string;
-  VoucherNumber: number;
-  Year: number;
-  Description: string;
-  TransactionDate: string;
-  VoucherRows?: FortnoxVoucherRow[];
-  "@url"?: string;
-}
-
-interface FortnoxVoucherListItem {
-  VoucherSeries: string;
-  VoucherNumber: number;
-  Description: string;
-  TransactionDate: string;
-  "@url"?: string;
-}
-
 interface VoucherListResponse {
   Vouchers: FortnoxVoucherListItem[];
   MetaInformation?: {
@@ -183,10 +171,12 @@ Args:
   - voucher_series (string): Voucher series (e.g., 'A') (required)
   - voucher_number (number): Voucher number within the series (required)
   - financial_year (number): Fortnox financial year ID (use fortnox_list_financial_years to find)
+  - include_removed_rows (boolean): Count removed rows in the totals (default: false)
   - response_format ('markdown' | 'json'): Output format
 
 Returns:
-  Complete voucher details including all debit/credit rows.`,
+  Complete voucher details including all debit/credit rows. Rows that were struck out
+  when the voucher was corrected have removed=true and are left out of the totals.`,
       inputSchema: GetVoucherSchema,
       annotations: {
         readOnlyHint: true,
@@ -206,6 +196,9 @@ Returns:
 
         const response = await fortnoxRequest<VoucherResponse>(endpoint, "GET", undefined, queryParams);
         const voucher = response.Voucher;
+        const voucherRows = voucher.VoucherRows || [];
+        const totals = summarizeVoucherRows(voucherRows, params.include_removed_rows);
+        const warning = unbalancedWarning(voucher, totals);
 
         const output = {
           voucher_series: voucher.VoucherSeries,
@@ -213,14 +206,9 @@ Returns:
           year: voucher.Year,
           description: voucher.Description,
           transaction_date: voucher.TransactionDate,
-          rows: (voucher.VoucherRows || []).map((row) => ({
-            account_number: row.Account,
-            debit: row.Debit || 0,
-            credit: row.Credit || 0,
-            description: row.Description || null,
-            cost_center: row.CostCenter || null,
-            project: row.Project || null
-          }))
+          rows: voucherRows.map(mapVoucherRow),
+          totals,
+          ...(warning ? { warning } : {})
         };
 
         let textContent: string;
@@ -240,18 +228,31 @@ Returns:
             "|---------|-------------|-------|--------|"
           ];
 
-          let totalDebit = 0;
-          let totalCredit = 0;
-
-          for (const row of voucher.VoucherRows || []) {
-            totalDebit += row.Debit || 0;
-            totalCredit += row.Credit || 0;
-            lines.push(
-              `| ${row.Account} | ${row.Description || "-"} | ${formatMoney(row.Debit || 0)} | ${formatMoney(row.Credit || 0)} |`
-            );
+          for (const row of voucherRows) {
+            const cells = [
+              `${row.Account}`,
+              row.Description || "-",
+              formatMoney(row.Debit || 0),
+              formatMoney(row.Credit || 0)
+            ];
+            if (row.Removed) {
+              cells[0] = `~~${cells[0]}~~`;
+              cells[1] = `~~${cells[1]}~~ (removed)`;
+            }
+            lines.push(`| ${cells.join(" | ")} |`);
           }
 
-          lines.push(`| **Total** | | **${formatMoney(totalDebit)}** | **${formatMoney(totalCredit)}** |`);
+          lines.push(`| **Total** | | **${formatMoney(totals.total_debit)}** | **${formatMoney(totals.total_credit)}** |`);
+          if (totals.removed_row_count > 0) {
+            lines.push("");
+            lines.push(totals.includes_removed_rows
+              ? `*Totals include ${totals.removed_row_count} removed row(s).*`
+              : `*${totals.removed_row_count} removed row(s) are struck out and left out of the totals.*`);
+          }
+          if (warning) {
+            lines.push("");
+            lines.push(`⚠️ ${warning}`);
+          }
 
           textContent = lines.join("\n");
         }
@@ -454,8 +455,9 @@ Common use cases:
 - Bank transactions: account_number=1930
 - Revenue analysis: account_range={ from: 3000, to: 3999 }
 
-Note: This tool fetches voucher details and filters client-side since the Fortnox API
-doesn't support native account filtering. Use date ranges to limit the scan.
+Note: The Fortnox voucher API can't filter by account, so this tool reads the SIE 4 export
+(all vouchers and rows of the financial year, in one request) and filters it. Without
+financial_year it reads the years overlapping the date range (at most 3), or the current year.
 
 Args:
   - account_number (number): Single account number to filter by (1000-9999)
@@ -467,11 +469,15 @@ Args:
   - to_date (string): Filter vouchers to this date (YYYY-MM-DD)
   - voucher_series (string): Filter by voucher series (e.g., 'A')
   - include_summary (boolean): Include totals per account (default: true)
-  - max_vouchers (number): Max vouchers to scan, 10-500 (default: 500)
+  - include_removed_rows (boolean): Include removed (struck-out correction) rows (default: false)
+  - max_transactions (number): Max transactions to return, newest first (default: 100)
   - response_format ('markdown' | 'json'): Output format
 
+At least one of account_number, account_numbers or account_range is required.
+
 Returns:
-  Transactions matching the account criteria with optional summary.
+  Transactions matching the account criteria with optional summary. Removed rows are
+  left out by default so corrected vouchers are not double-counted.
 
 Examples:
   - First call fortnox_list_financial_years to find that ID 4 = 2025
@@ -488,6 +494,10 @@ Examples:
     },
     async (params: AccountActivityInput) => {
       try {
+        if (params.account_number === undefined && params.account_numbers === undefined && params.account_range === undefined) {
+          throw new Error("Must specify at least one of: account_number, account_numbers, or account_range");
+        }
+
         // Build account filter set
         const accountFilter = new Set<number>();
         if (params.account_number !== undefined) {
@@ -503,43 +513,22 @@ Examples:
           accountRangeTo = params.account_range.to;
         }
 
-        // Build query params
-        const queryParams: Record<string, string | number | boolean | undefined> = {
-          financialyear: params.financial_year
-        };
-
-        // Handle period convenience filter
+        // Resolve the date range
+        let fromDate: string | undefined;
+        let toDate: string | undefined;
         let dateRangeDescription: string | undefined;
         if (params.period) {
           const dateRange = periodToDateRange(params.period);
-          queryParams.fromdate = dateRange.from_date;
-          queryParams.todate = dateRange.to_date;
+          fromDate = dateRange.from_date;
+          toDate = dateRange.to_date;
           dateRangeDescription = getPeriodDescription(params.period);
         } else {
-          if (params.from_date) queryParams.fromdate = params.from_date;
-          if (params.to_date) queryParams.todate = params.to_date;
-          if (params.from_date || params.to_date) {
-            dateRangeDescription = `${params.from_date || "start"} to ${params.to_date || "end"}`;
+          fromDate = params.from_date;
+          toDate = params.to_date;
+          if (fromDate || toDate) {
+            dateRangeDescription = `${fromDate || "start"} to ${toDate || "end"}`;
           }
         }
-
-        // Determine endpoint based on series filter
-        let endpoint = "/3/vouchers";
-        if (params.voucher_series) {
-          endpoint = `/3/vouchers/sublist/${encodeURIComponent(params.voucher_series)}`;
-        }
-
-        // Fetch voucher list
-        const result = await fetchAllPages<FortnoxVoucherListItem, VoucherListResponse>(
-          endpoint,
-          queryParams,
-          (r) => r.Vouchers || [],
-          (r) => r.MetaInformation?.["@TotalResources"] || 0,
-          { maxResults: params.max_vouchers, maxPages: Math.ceil(params.max_vouchers / 100) }
-        );
-
-        const voucherList = result.items;
-        const totalVouchers = result.total;
 
         // Helper to check if account matches filter
         const accountMatches = (account: number): boolean => {
@@ -550,7 +539,6 @@ Examples:
           return false;
         };
 
-        // Batch fetch voucher details with rate limiting
         const matchingTransactions: Array<{
           voucher_series: string;
           voucher_number: number;
@@ -560,80 +548,98 @@ Examples:
           description: string | null;
           debit: number;
           credit: number;
+          cost_center: string | null;
+          project: string | null;
+          removed: boolean;
         }> = [];
 
         const accountSummary = new Map<number, { debit: number; credit: number; count: number }>();
+        const unbalancedVouchers: string[] = [];
+        let unbalancedCount = 0;
+        let matchingCount = 0;
+        let totalVouchers = 0;
+        let vouchersScanned = 0;
 
-        // Process vouchers in batches of 10
-        const batchSize = 10;
-        for (let i = 0; i < voucherList.length; i += batchSize) {
-          const batch = voucherList.slice(i, i + batchSize);
+        const newestFirst = (a: { transaction_date: string; voucher_number: number }, b: { transaction_date: string; voucher_number: number }) =>
+          b.transaction_date.localeCompare(a.transaction_date) || b.voucher_number - a.voucher_number;
 
-          // Fetch details for batch in parallel
-          const detailPromises = batch.map(async (v) => {
-            const detailEndpoint = `/3/vouchers/${encodeURIComponent(v.VoucherSeries)}/${v.VoucherNumber}`;
-            const detailParams: Record<string, string | number | boolean | undefined> = {
-              financialyear: params.financial_year
-            };
-            try {
-              const detail = await fortnoxRequest<VoucherResponse>(detailEndpoint, "GET", undefined, detailParams);
-              return detail.Voucher;
-            } catch {
-              return null;
+        // Read the SIE 4 export: every voucher and row of the year in one request
+        const financialYears = await resolveFinancialYears(params.financial_year, fromDate, toDate);
+        if (financialYears.length > MAX_SIE_YEARS_PER_CALL) {
+          throw new Error(
+            `The date range covers ${financialYears.length} financial years; this tool reads at most ` +
+            `${MAX_SIE_YEARS_PER_CALL} per call. Narrow from_date/to_date or call once per financial_year.`
+          );
+        }
+        for (const year of financialYears) {
+          const sie = await fetchSie4(year);
+          totalVouchers += sie.vouchers.length;
+
+          for (const voucher of sie.vouchers) {
+            if (params.voucher_series && voucher.series !== params.voucher_series) continue;
+            if (fromDate && voucher.date < fromDate) continue;
+            if (toDate && voucher.date > toDate) continue;
+            vouchersScanned++;
+
+            const activeSum = voucher.rows
+              .filter((row) => !row.removed)
+              .reduce((sum, row) => sum + row.amount, 0);
+            if (Math.abs(activeSum) >= 0.005) {
+              unbalancedCount++;
+              if (unbalancedVouchers.length < MAX_UNBALANCED_LISTED) {
+                unbalancedVouchers.push(`${voucher.series}${voucher.number}`);
+              }
             }
-          });
 
-          const details = await Promise.all(detailPromises);
+            for (const row of voucher.rows) {
+              if (row.removed && !params.include_removed_rows) continue;
+              if (!accountMatches(row.account)) continue;
 
-          // Process results
-          for (const voucher of details) {
-            if (!voucher || !voucher.VoucherRows) continue;
+              const debit = row.amount > 0 ? row.amount : 0;
+              const credit = row.amount < 0 ? -row.amount : 0;
+              matchingCount++;
+              matchingTransactions.push({
+                voucher_series: voucher.series,
+                voucher_number: voucher.number,
+                transaction_date: voucher.date,
+                voucher_description: voucher.text,
+                account: row.account,
+                description: row.text || sie.accountNames.get(row.account) || null,
+                debit,
+                credit,
+                cost_center: row.cost_center,
+                project: row.project,
+                removed: row.removed
+              });
 
-            for (const row of voucher.VoucherRows) {
-              if (accountMatches(row.Account)) {
-                matchingTransactions.push({
-                  voucher_series: voucher.VoucherSeries,
-                  voucher_number: voucher.VoucherNumber,
-                  transaction_date: voucher.TransactionDate,
-                  voucher_description: voucher.Description,
-                  account: row.Account,
-                  description: row.Description || null,
-                  debit: row.Debit || 0,
-                  credit: row.Credit || 0
-                });
-
-                // Update summary
-                if (params.include_summary) {
-                  const existing = accountSummary.get(row.Account) || { debit: 0, credit: 0, count: 0 };
-                  existing.debit += row.Debit || 0;
-                  existing.credit += row.Credit || 0;
-                  existing.count += 1;
-                  accountSummary.set(row.Account, existing);
-                }
+              if (params.include_summary) {
+                const existing = accountSummary.get(row.account) || { debit: 0, credit: 0, count: 0 };
+                existing.debit += debit;
+                existing.credit += credit;
+                existing.count += 1;
+                accountSummary.set(row.account, existing);
               }
             }
           }
 
-          // Rate limit delay between batches (except last batch)
-          if (i + batchSize < voucherList.length) {
-            await new Promise(resolve => setTimeout(resolve, FETCH_ALL_DELAY_MS));
-          }
+          // Keep only the newest rows that can be returned; the summary already counts every match
+          matchingTransactions.sort(newestFirst);
+          matchingTransactions.length = Math.min(matchingTransactions.length, params.max_transactions);
         }
 
-        // Sort transactions by date descending
-        matchingTransactions.sort((a, b) =>
-          b.transaction_date.localeCompare(a.transaction_date) ||
-          b.voucher_number - a.voucher_number
-        );
+        const unbalancedMore = unbalancedCount - unbalancedVouchers.length;
+        const warnings = unbalancedCount > 0
+          ? [`Active rows do not balance on: ${unbalancedVouchers.join(", ")}${unbalancedMore > 0 ? ` and ${unbalancedMore} more` : ""}. Check these vouchers in Fortnox.`]
+          : [];
 
         // Build output
         const summaryArray = params.include_summary
           ? Array.from(accountSummary.entries())
               .map(([account, data]) => ({
                 account,
-                total_debit: data.debit,
-                total_credit: data.credit,
-                net_change: data.credit - data.debit,
+                total_debit: Math.round(data.debit * 100) / 100,
+                total_credit: Math.round(data.credit * 100) / 100,
+                net_change: Math.round((data.credit - data.debit) * 100) / 100,
                 transaction_count: data.count
               }))
               .sort((a, b) => a.account - b.account)
@@ -647,11 +653,15 @@ Examples:
             date_range: dateRangeDescription || null,
             voucher_series: params.voucher_series || null
           },
-          vouchers_scanned: voucherList.length,
+          source: "sie4",
+          financial_years_read: financialYears.map((y) => y ?? "current"),
+          vouchers_scanned: vouchersScanned,
           total_vouchers_available: totalVouchers,
-          truncated: result.truncated,
-          truncation_reason: result.truncationReason,
-          matching_transactions: matchingTransactions.length,
+          truncated: false,
+          include_removed_rows: params.include_removed_rows,
+          warnings,
+          matching_transactions: matchingCount,
+          transactions_returned: matchingTransactions.length,
           summary: summaryArray,
           transactions: matchingTransactions
         };
@@ -675,12 +685,12 @@ Examples:
           if (dateRangeDescription) {
             lines.push(`**Period**: ${dateRangeDescription}`);
           }
-          lines.push(`**Financial Year**: ${params.financial_year}`);
-          lines.push(`**Vouchers Scanned**: ${voucherList.length} | **Matching Transactions**: ${matchingTransactions.length}`);
+          lines.push(`**Financial Year**: ${financialYears.map((y) => y ?? "current").join(", ")}`);
+          lines.push(`**Vouchers Scanned**: ${vouchersScanned} | **Matching Transactions**: ${matchingCount}`);
 
-          if (result.truncated) {
+          for (const warning of warnings) {
             lines.push("");
-            lines.push(`⚠️ **Note**: ${result.truncationReason}`);
+            lines.push(`⚠️ ${warning}`);
           }
 
           if (summaryArray && summaryArray.length > 0) {
@@ -704,17 +714,15 @@ Examples:
             lines.push("| Date | Voucher | Account | Description | Debit | Credit |");
             lines.push("|------|---------|---------|-------------|-------|--------|");
 
-            const displayLimit = 100;
-            const displayTransactions = matchingTransactions.slice(0, displayLimit);
-
-            for (const t of displayTransactions) {
+            for (const t of matchingTransactions) {
+              const description = `${t.description || t.voucher_description}${t.removed ? " (removed)" : ""}`;
               lines.push(
-                `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${t.description || t.voucher_description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
+                `| ${formatDisplayDate(t.transaction_date)} | ${t.voucher_series}${t.voucher_number} | ${t.account} | ${description} | ${formatMoney(t.debit)} | ${formatMoney(t.credit)} |`
               );
             }
 
-            if (matchingTransactions.length > displayLimit) {
-              lines.push(`| ... | ... | ... | *${matchingTransactions.length - displayLimit} more transactions* | ... | ... |`);
+            if (matchingCount > matchingTransactions.length) {
+              lines.push(`| ... | ... | ... | *${matchingCount - matchingTransactions.length} more transactions* | ... | ... |`);
             }
           } else {
             lines.push("");
@@ -751,7 +759,8 @@ Args:
   - to_date (string): Filter vouchers to this date (YYYY-MM-DD)
   - voucher_series (string): Filter by voucher series (e.g., 'A')
   - case_sensitive (boolean): Case-sensitive search (default: false)
-  - include_rows (boolean): Include voucher row details (default: false)
+  - include_rows (boolean): Include voucher row details and search row descriptions (default: false)
+  - include_removed_rows (boolean): With include_rows, also return removed rows (default: false)
   - max_vouchers (number): Max vouchers to scan, 10-500 (default: 500)
   - response_format ('markdown' | 'json'): Output format
 
@@ -836,58 +845,56 @@ Examples:
             description: string | null;
             debit: number;
             credit: number;
-          }>;
+            removed: boolean;
+          }> | null;
         }
 
         const matchingVouchers: MatchingVoucher[] = [];
+        let fetchFailures: Awaited<ReturnType<typeof fetchVoucherDetails>>["failures"] = [];
 
         if (params.include_rows) {
           // Fetch details for all vouchers (to check row descriptions too)
-          const batchSize = 10;
-          for (let i = 0; i < voucherList.length; i += batchSize) {
-            const batch = voucherList.slice(i, i + batchSize);
+          const details = await fetchVoucherDetails(voucherList, params.financial_year);
+          fetchFailures = details.failures;
+          const detailByKey = new Map(details.vouchers.map((v) => [`${v.VoucherSeries}${v.VoucherNumber}`, v]));
 
-            const detailPromises = batch.map(async (v) => {
-              const detailEndpoint = `/3/vouchers/${encodeURIComponent(v.VoucherSeries)}/${v.VoucherNumber}`;
-              const detailParams: Record<string, string | number | boolean | undefined> = {
-                financialyear: params.financial_year
-              };
-              try {
-                const detail = await fortnoxRequest<VoucherResponse>(detailEndpoint, "GET", undefined, detailParams);
-                return detail.Voucher;
-              } catch {
-                return null;
-              }
-            });
+          for (const item of voucherList) {
+            const voucher = detailByKey.get(`${item.VoucherSeries}${item.VoucherNumber}`);
 
-            const details = await Promise.all(detailPromises);
-
-            for (const voucher of details) {
-              if (!voucher) continue;
-
-              const descriptionMatch = textMatches(voucher.Description);
-              const rowMatch = voucher.VoucherRows?.some(row => textMatches(row.Description));
-
-              if (descriptionMatch || rowMatch) {
+            if (!voucher) {
+              // Details could not be fetched; still report a match on the list description
+              if (textMatches(item.Description)) {
                 matchingVouchers.push({
-                  voucher_series: voucher.VoucherSeries,
-                  voucher_number: voucher.VoucherNumber,
-                  transaction_date: voucher.TransactionDate,
-                  description: voucher.Description,
-                  matched_in: descriptionMatch ? "description" : "row",
-                  rows: voucher.VoucherRows?.map(row => ({
-                    account: row.Account,
-                    description: row.Description || null,
-                    debit: row.Debit || 0,
-                    credit: row.Credit || 0
-                  }))
+                  voucher_series: item.VoucherSeries,
+                  voucher_number: item.VoucherNumber,
+                  transaction_date: item.TransactionDate,
+                  description: item.Description,
+                  matched_in: "description",
+                  rows: null
                 });
               }
+              continue;
             }
 
-            // Rate limit delay between batches
-            if (i + batchSize < voucherList.length) {
-              await new Promise(resolve => setTimeout(resolve, FETCH_ALL_DELAY_MS));
+            const rows = countedRows(voucher.VoucherRows || [], params.include_removed_rows);
+            const descriptionMatch = textMatches(voucher.Description);
+            const rowMatch = rows.some(row => textMatches(row.Description));
+
+            if (descriptionMatch || rowMatch) {
+              matchingVouchers.push({
+                voucher_series: voucher.VoucherSeries,
+                voucher_number: voucher.VoucherNumber,
+                transaction_date: voucher.TransactionDate,
+                description: voucher.Description,
+                matched_in: descriptionMatch ? "description" : "row",
+                rows: rows.map(row => ({
+                  account: row.Account,
+                  description: row.Description || null,
+                  debit: row.Debit || 0,
+                  credit: row.Credit || 0,
+                  removed: row.Removed === true
+                }))
+              });
             }
           }
         } else {
@@ -902,6 +909,7 @@ Examples:
             });
           }
         }
+        const fetchWarning = failureWarning(fetchFailures);
 
         // Sort by date descending
         matchingVouchers.sort((a, b) =>
@@ -920,6 +928,8 @@ Examples:
           total_vouchers_available: totalVouchers,
           truncated: result.truncated,
           truncation_reason: result.truncationReason,
+          voucher_fetch_failures: fetchFailures,
+          warnings: fetchWarning ? [fetchWarning] : [],
           matching_count: matchingVouchers.length,
           vouchers: matchingVouchers
         };
@@ -944,6 +954,10 @@ Examples:
             lines.push("");
             lines.push(`⚠️ **Note**: ${result.truncationReason}`);
           }
+          if (fetchWarning) {
+            lines.push("");
+            lines.push(`⚠️ ${fetchWarning}`);
+          }
 
           if (matchingVouchers.length > 0) {
             lines.push("");
@@ -962,7 +976,7 @@ Examples:
                 lines.push("| Account | Description | Debit | Credit |");
                 lines.push("|---------|-------------|-------|--------|");
                 for (const row of v.rows) {
-                  const rowDesc = row.description || "-";
+                  const rowDesc = `${row.description || "-"}${row.removed ? " (removed)" : ""}`;
                   const highlight = textMatches(row.description || "") ? " **" : "";
                   lines.push(`| ${row.account} | ${highlight}${rowDesc}${highlight} | ${formatMoney(row.debit)} | ${formatMoney(row.credit)} |`);
                 }

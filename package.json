@@ -20,7 +20,9 @@
     "release": "./scripts/release.sh",
     "release:patch": "./scripts/release.sh patch",
     "release:minor": "./scripts/release.sh minor",
-    "release:major": "./scripts/release.sh major"
+    "release:major": "./scripts/release.sh major",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "get-token": "tsx scripts/get-token.ts"
   },
   "engines": {
     "node": ">=18"
@@ -37,6 +39,7 @@
     "axios": "^1.7.9",
     "express": "^4.21.0",
     "jose": "^5.9.6",
+    "unpdf": "^1.9.1",
     "zod": "^3.23.8"
   },
   "optionalDependencies": {
